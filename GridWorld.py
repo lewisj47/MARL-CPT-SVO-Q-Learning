@@ -18,6 +18,17 @@ n_agents = 1
 num_episodes = args.episodes
 all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
 
+#Q-learning Definitions
+alpha = 0.88
+beta = 0.88
+lr = 0.2
+discount = 0.95
+epsilon = 1.0
+min_epsilon = 0.05
+decay_rate = 0.995
+# Note: will need to update epsilon per episode using
+#       agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
+
 #An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
 totObs = []
 
@@ -130,6 +141,27 @@ class Agent:
         return self.valid
         
     
+    def getQValue(self, state, action): #takes state as coord tuple and action as [up], [left]...
+        """
+            Returns Q(state,action)
+            Note: need to make sure it returns zero if state is new
+        """
+        return self.qtable[state][action]
+    
+    def updateQ(self, state, action, next_state, reward):
+        """
+            Performs the CPT-based Q-value update
+        """
+        u_r = self.utility_function(reward)
+
+        next_q = self.computeValueFromQValues(next_state)
+        target = u_r + (discount * next_q)
+        old_q = self.getQValue(state, action)
+        new_q = ((1 - lr) * old_q) + (alpha * target)
+    
+
+    def utility_function(self, reward):
+        return (reward ** alpha) if reward > 0 else (-self.lamda * (reward ** alpha))
 
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
 agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
@@ -138,8 +170,8 @@ agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), age
 plt.ion()
 plt.show()
 
-for i in num_episodes:
-    for i in range(0,args.size):
+for i in range(num_episodes):
+    for i in range(args.size):
         env.updateWorld(agents[0], (args.size//3,i))
         env.render()
         plt.pause(0.01)
