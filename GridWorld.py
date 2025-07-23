@@ -7,13 +7,16 @@ import numpy as np
 from itertools import product
 import argparse
 
-#The parse arguments allow for arguments to be passed to the program via the command line
+#The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
 parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
+parser.addargument("episodes", type=int, help="The number of episodes to undergo during training")
 args = parser.parse_args()
 
 #Right now there is 1 agent
 n_agents = 1
+num_episodes = args.episodes
+all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
 
 #Q-learning Definitions
 alpha = 0.88
@@ -95,13 +98,13 @@ class FlatGridWorld:
     #grid spaces where the agent is allowed to move to. 
     def updateWorld(self, agent, new_pos):
         for i in range(n_agents):
-            if new_pos not in totObs and new_pos in agent.availableSqrs() and (0<new_pos[0]<args.size) and (0<new_pos[1]<args.size):
+            if new_pos  in agent.availableSqrs():
                 agent.agent_pos = new_pos
 
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
 class Agent:
-    def __init__(self, start, agent_n, agent_pos, agent_v, phi, lamda, gamma):
+    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma, qtable):
         self.agent_n = agent_n
         self.start = start
         self.agent_pos = agent_pos
@@ -109,6 +112,10 @@ class Agent:
         self.phi = phi
         self.lamda = lamda
         self.gamma = gamma
+        self.qtable = {
+            coord: {"up": 0, "down": 0, "left": 0, "right": 0}
+            for coord in all_sqrs
+        }
         self.reset()
 
     #Reset is called at the end of the initializing function to ensure the agents are at the right starting points
@@ -127,7 +134,12 @@ class Agent:
         (self.agent_pos[0] + 1, self.agent_pos[1] - 1),
         (self.agent_pos[0] - 1, self.agent_pos[1] - 1)]
 
+        for i in self.valid:
+            if i in totObs or (i[0]>args.size) and (i[1]>args.size):
+                self.valid.remove(i)
+        
         return self.valid
+        
     
     def getQValue(self, state, action): #takes state as coord tuple and action as [up], [left]...
         """
@@ -154,18 +166,12 @@ class Agent:
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
 agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
 
-#An empty array which contains a 6-entry tuple for every grid square and associated speed. These hold the 
-# associated q-value for each action at a given state. 
-AllQ = [[[(None,)*6 for _ in range(env.size)] 
-            for _ in range(env.size)] 
-            for _ in range(3)] 
-
 #Show the visualization
-plt.ion() 
+plt.ion()
 plt.show()
 
-for i in range(0,args.size):
-    env.updateWorld(agents[0], (args.size//3,i))
-    env.render()
-    plt.pause(0.01)
-
+for i in range(num_episodes):
+    for i in range(args.size):
+        env.updateWorld(agents[0], (args.size//3,i))
+        env.render()
+        plt.pause(0.01)
