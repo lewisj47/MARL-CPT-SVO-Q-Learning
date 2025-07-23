@@ -2,43 +2,96 @@
 
 import matplotlib.pyplot as plt
 from matplotlib import colors
+from matplotlib.patches import Arc
 import numpy as np
 from itertools import product
-import time
+import argparse
 
-L = 12
-n_agents = 4
+parser = argparse.ArgumentParser()
+parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
+args = parser.parse_args()
+
+
+n_agents = 1
 
 totObs = []
 
-
-Obs1 = [(r, c) for r in range(0,int(L/4)) for c in range(L)]
+Obs1 = [(r, c) for r in range(0,(args.size//4)) for c in range(args.size)]
 totObs.extend(Obs1)
 
-Obs2 = [(r, c) for r in range(int(L/2), L) for c in range(int(L/2))]
+Obs2 = [(r, c) for r in range((args.size//2), args.size) for c in range((args.size//2))]
 totObs.extend(Obs2)
 
-Obs3 = [(r, c) for r in range(int(L/2),L) for c in range(int(L*3/4),L)]
+Obs3 = [(r, c) for r in range((args.size//2),args.size) for c in range(((args.size*3)//4),args.size)]
 totObs.extend(Obs3)
 
 B = []
 for i in range(n_agents):
-    B.append(L**2-1)
-
-#Identifying corners and edges in the grid 
-Corners = [0, L-1, L**2-L, L**2-1]
-Left_Side = list(range(L,(L-1)*L,L))
-Bottom = list(range(1,L-1))
-Right_Side = list(range(2*L-1,L**2-1,L))
-Top = list(range(L**2-L+1,L**2-1))
+    B.append(args.size**2-1)
 
 class FlatGridWorld:
-    def __init__(self, size=L, start=(0,int((2/3) * L)), goal=(int((2/3) * L),int(L - (L/12))), obstacles=[]):
-        self.size = size  # grid is size x size
+    def __init__(self, size, goal, obstacles=[]):
+        self.size = args.size  # grid is size x size
         self.n_squares = size * size
-        self.start = start
         self.goal = goal
         self.obstacles = [Obs1, Obs2, Obs3]
+
+
+    def render(self):
+        plt.clf()
+
+        grid = np.zeros((self.size, self.size))
+
+        # Fill in obstacle, agent, start, goal
+        for coord in product(range(args.size), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
+            if coord in totObs:
+                grid[coord] = -1
+
+        for i in range(n_agents):
+            grid[agents[i].agent_pos] = 1.0
+
+        grid[self.goal] = 0.8
+
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
+        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
+        norm = colors.BoundaryNorm(bounds, cmap.N)
+
+        arc = Arc(
+            xy=(args.size//2 - 0.5, args.size//2 - 0.5),             # center of the full ellipse
+            width=args.size//4, height=args.size//4,     # diameter of the arc (radius*2)
+            angle=270,               # rotation of the arc
+            theta1=0, theta2=90,   # start and end angles in degrees
+            color='white',
+            linestyle=(0, (10, 5)),
+            linewidth=2
+        )
+
+        plt.imshow(grid, cmap=cmap, norm=norm)
+        plt.xticks([])
+        plt.yticks([])
+        plt.axvline(ymax = 0.50, x = args.size*5//8 - 0.5 if (args.size//12)%2 == 0 else args.size*5//8, color = 'yellow', linestyle='--') #((L/4)%2)*0.5)
+        plt.axhline(xmin = 0.75, y= args.size*3//8 - 0.5 if (args.size//12)%2 == 0 else args.size//3, color='yellow', linestyle='--')
+        plt.axhline(xmax = 0.5, y = args.size*3//8 - 0.5 if (args.size//12)%2 == 0 else args.size//3, color='yellow', linestyle='--')
+
+        ax = plt.gca()
+        ax.add_patch(arc)
+
+        plt.grid(True)
+
+    def updateWorld(self, agent, new_pos):
+        for i in range(n_agents):
+            if new_pos not in totObs and new_pos in agent.availableSqrs() and (0<new_pos[0]<args.size) and (0<new_pos[1]<args.size):
+                agent.agent_pos = new_pos
+
+class Agent:
+    def __init__(self, start, agent_n, agent_pos, agent_v, phi, lamda, gamma):
+        self.agent_n = agent_n
+        self.start = start
+        self.agent_pos = agent_pos
+        self.agent_v = agent_v
+        self.phi = phi
+        self.lamda = lamda
+        self.gamma = gamma
         self.reset()
 
     def reset(self):
@@ -56,41 +109,17 @@ class FlatGridWorld:
         (self.agent_pos[0] - 1, self.agent_pos[1] - 1)]
 
         return self.valid
+    
 
-    def render(self):
-        grid = np.zeros((self.size, self.size))
+AllQ = [[(None,) * 6 for _ in range(args.size)] for _ in range(args.size)]
 
-        # Fill in obstacle, agent, start, goal
-        for coord in product(range(L), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
-            if coord in totObs:
-                grid[coord] = -1
-        
-        grid[0,0] = 0.2
+env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
+agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
 
-        grid[self.agent_pos] = 1.5
+plt.ion() 
+plt.show()
 
-        grid[self.goal] = 0.8
-
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
-        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
-        norm = colors.BoundaryNorm(bounds, cmap.N)
-
-        plt.imshow(grid, cmap=cmap, norm=norm)
-        plt.xticks([])
-        plt.yticks([])
-        plt.grid(True)
-        plt.ion() 
-        plt.show()
-
-    def updateWorld(self, new_pos):
-        if new_pos not in totObs and new_pos in self.availableSqrs() and (0<new_pos[0]<12) and (0<new_pos[1]<12):
-            self.agent_pos = new_pos
-
-env = FlatGridWorld(size=L, start=(0,int((2/3) * L)), goal=(int((2/3) * L),L - L/12), obstacles=(Obs1,Obs2,Obs3))
-
-state = env.reset()
-
-for i in range(1,15):
-    env.updateWorld((4,i))
+for i in range(0,args.size):
+    env.updateWorld(agents[0], (args.size//3,i))
     env.render()
-    plt.pause(0.5)
+    plt.pause(0.01)
