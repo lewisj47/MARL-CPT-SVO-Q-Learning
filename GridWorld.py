@@ -7,13 +7,15 @@ import numpy as np
 from itertools import product
 import argparse
 
+#The parse arguments allow for arguments to be passed to the program via the command line
 parser = argparse.ArgumentParser()
 parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
 args = parser.parse_args()
 
-
+#Right now there is 1 agent
 n_agents = 1
 
+#An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
 totObs = []
 
 Obs1 = [(r, c) for r in range(0,(args.size//4)) for c in range(args.size)]
@@ -25,10 +27,9 @@ totObs.extend(Obs2)
 Obs3 = [(r, c) for r in range((args.size//2),args.size) for c in range(((args.size*3)//4),args.size)]
 totObs.extend(Obs3)
 
-B = []
-for i in range(n_agents):
-    B.append(args.size**2-1)
 
+#This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
+#one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
 class FlatGridWorld:
     def __init__(self, size, goal, obstacles=[]):
         self.size = args.size  # grid is size x size
@@ -36,7 +37,8 @@ class FlatGridWorld:
         self.goal = goal
         self.obstacles = [Obs1, Obs2, Obs3]
 
-
+    #Render sets a cmap for the obstacles, agents, and road, as well as creating lines for the road. It generates the
+    #new world every time a change is made. 
     def render(self):
         plt.clf()
 
@@ -78,11 +80,15 @@ class FlatGridWorld:
 
         plt.grid(True)
 
+    #Update world will take in an agent and a new position and update that agents position according to 
+    #grid spaces where the agent is allowed to move to. 
     def updateWorld(self, agent, new_pos):
         for i in range(n_agents):
             if new_pos not in totObs and new_pos in agent.availableSqrs() and (0<new_pos[0]<args.size) and (0<new_pos[1]<args.size):
                 agent.agent_pos = new_pos
 
+#The agent class holds the relevant information for each agent including starting location as a coordinate, 
+#the number of the agent, the position, the speed, and the hyperparameter. 
 class Agent:
     def __init__(self, start, agent_n, agent_pos, agent_v, phi, lamda, gamma):
         self.agent_n = agent_n
@@ -94,10 +100,12 @@ class Agent:
         self.gamma = gamma
         self.reset()
 
+    #Reset is called at the end of the initializing function to ensure the agents are at the right starting points
     def reset(self):
         self.agent_pos = self.start
         return self.agent_pos
 
+    #Returns available squares which an agent may legally move to for any given agent. 
     def availableSqrs(self):
         self.valid = [(self.agent_pos[0] + 1, self.agent_pos[1]), 
         (self.agent_pos[0] - 1, self.agent_pos[1]), 
@@ -111,11 +119,16 @@ class Agent:
         return self.valid
     
 
-AllQ = [[(None,) * 6 for _ in range(args.size)] for _ in range(args.size)]
-
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
 agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
 
+#An empty array which contains a 6-entry tuple for every grid square and associated speed. These hold the 
+# associated q-value for each action at a given state. 
+AllQ = [[[(None,)*6 for _ in range(env.size)] 
+            for _ in range(env.size)] 
+            for _ in range(3)] 
+
+#Show the visualization
 plt.ion() 
 plt.show()
 
