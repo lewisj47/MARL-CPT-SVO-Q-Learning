@@ -7,13 +7,22 @@ import numpy as np
 from itertools import product
 import argparse
 
-#The parse arguments allow for arguments to be passed to the program via the command line
+#The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
 parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
 args = parser.parse_args()
 
 #Right now there is 1 agent
 n_agents = 1
+
+#An empty array which contains a 4-entry tuple for every grid square. These hold the 
+# associated q-value for each action at a given state. 
+AllQ = []
+
+for i in range(n_agents):
+    qtable = [[(0,0,0,0) for _ in range(args.size)] 
+                        for _ in range(args.size)] 
+    AllQ.append(qtable)
 
 #An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
 totObs = []
@@ -90,7 +99,7 @@ class FlatGridWorld:
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
 class Agent:
-    def __init__(self, start, agent_n, agent_pos, agent_v, phi, lamda, gamma):
+    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma):
         self.agent_n = agent_n
         self.start = start
         self.agent_pos = agent_pos
@@ -121,12 +130,6 @@ class Agent:
 
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
 agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
-
-#An empty array which contains a 6-entry tuple for every grid square and associated speed. These hold the 
-# associated q-value for each action at a given state. 
-AllQ = [[[(None,)*6 for _ in range(env.size)] 
-            for _ in range(env.size)] 
-            for _ in range(3)] 
 
 #Show the visualization
 plt.ion() 
