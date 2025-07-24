@@ -142,15 +142,32 @@ class Agent:
         
         return self.valid
         
-    
-    def getQValue(self, state, action): #takes state as coord tuple and action as [up], [left]...
+    def getLegalActions(self):
+        legal_actions = []
+        for i in self.availableSqrs():
+            if i[0] > self.agent_pos[0]:
+                legal_actions.append("down")
+            if i[0] < self.agent_pos[0]:
+                legal_actions.append("up")
+            if i[1] > self.agent_pos[1]:
+                legal_actions.append("right")
+            if i[1] < self.agent_pos[1]:
+                legal_actions.append("left")
+
+        if self.agent_pos == env.goal:
+            legal_actions = [0]
+            return legal_actions
+        else:
+            return legal_actions
+            
+    def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
         """
-            Returns Q(state,action)
+            Returns Q(state, action)
             Note: need to make sure it returns zero if state is new
         """
-        return self.qtable[state][action]
+        return self.qtable[self.agent_pos][action]
     
-    def updateQ(self, state, action, next_state, reward):
+    def updateQ(self, action, next_state, reward):
         """
             Performs the CPT-based Q-value update
         """
@@ -158,9 +175,10 @@ class Agent:
 
         next_q = self.computeValueFromQValues(next_state) #need to verify will work
         target = u_r + (discount * next_q)
-        old_q = self.getQValue(state, action)
+        old_q = self.getQValue(action)
         new_q = ((1 - lr) * old_q) + (lr * target)
-    
+
+        return new_q
 
     def utility_function(self, reward):
         """
@@ -186,69 +204,67 @@ class Agent:
         """
         #need to write
 
-    def getAction(self, state):
+    def getAction(self):
         """
             Choose an action for a given state using the exploration rate
             When exploiting, use computeActionFromQValues
         """
-        legalActions = self.getLegalActions(state)
+        
+        legalActions = self.getLegalActions()
         action = None
 
         #If at terminal state no legal actions can be taken
-        if not self.getLegalActions(state):
+        if self.getLegalActions() == [0]:
             return None
         
         #Choose explore or exploit based on exploration rate epsilon
-        epsilon = self.epsilon
         explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
         if explore == True:
-            actions_list = []
-            for action in self.getLegalActions(state):
-                actions_list.append(action)
-                action = random.choice(actions_list)
+            action = random.choice(self.getLegalActions())
         else:
-            action = self.getPolicy(state)
+            action = self.getPolicy(self.agent_pos)
+
         return action
     
-    def computeActionFromQValues(self, state):
+    def computeActionFromQValues(self):
         """
             Compute best action to take in a state. Will need to add 
             belief distribution for multi-agent CPT 
         """
         #If at terminal state no legal actions can be taken
-        if not self.getLegalActions(state):
+        if not self.getLegalActions():
             return None
         
         best_value = -float('inf') #may reduce to high int for speed?
-        for action in self.getLegalActions(state):
-            value = self.getQValue(state, action)
+        for action in self.getLegalActions(self.agent_pos):
+            value = self.getQValue(self.agent_pos, action)
             best_value = max(best_value, value)
             if best_value == value:
                 best_action = action
         return best_action
     
-    def computeValueFromQValues(self, state):
+    def computeValueFromQValues(self):
         """
             Currently returns max_action Q(state, action) where max is over legal actions.
             Need to update for CPT
         """
         #If at terminal state no legal actions can be taken
-        if not self.getLegalActions(state):
+        if not self.getLegalActions(self.agent_pos):
             return None # or maybe 0.0?
         
         #need to change for CPT
         best_value = -float('inf')
-        for action in self.getLegalActions(state):
-            value = self.getQValue(state, action)
+        for action in self.getLegalActions():
+            value = self.getQValue(action)
             best_value = max(best_value,value)
         return best_value
         
-    def getPolicy(self, state):
-        return self.computeActionFromQValues(state)
+    def getPolicy(self):
+        return self.computeActionFromQValues()
     
     # May be redundant
-    def getValue(self, state):
-        return self.computeValueFromQValues(state)
+    def getValue(self):
+        return self.computeValueFromQValues()
 
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
 agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
@@ -258,6 +274,7 @@ plt.ion()
 plt.show()
 
 for i in range(num_episodes):
+    agents[0].reset()
     for i in range(args.size):
         env.updateWorld(agents[0], (args.size//3,i))
         env.render()
