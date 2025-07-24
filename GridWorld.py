@@ -191,7 +191,7 @@ class Agent:
             Choose an action for a given state using the exploration rate
             When exploiting, use computeActionFromQValues
         """
-        legalActions = self.getLegalActions(state) #is this written yet?
+        legalActions = self.getLegalActions(state)
         action = None
 
         #If at terminal state no legal actions can be taken
