@@ -6,6 +6,7 @@ from matplotlib.patches import Arc
 import numpy as np
 from itertools import product
 import argparse
+import random
 
 #The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
@@ -104,14 +105,15 @@ class FlatGridWorld:
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
 class Agent:
-    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma, qtable):
+    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma_gain, gamma_loss, qtable):
         self.agent_n = agent_n
         self.start = start
         self.agent_pos = agent_pos
         self.agent_v = agent_v
         self.phi = phi
         self.lamda = lamda
-        self.gamma = gamma
+        self.gamma_gain = gamma_gain
+        self.gamma_loss = gamma_loss
         self.qtable = {
             coord: {"up": 0, "down": 0, "left": 0, "right": 0}
             for coord in all_sqrs
@@ -154,14 +156,99 @@ class Agent:
         """
         u_r = self.utility_function(reward)
 
-        next_q = self.computeValueFromQValues(next_state)
+        next_q = self.computeValueFromQValues(next_state) #need to verify will work
         target = u_r + (discount * next_q)
         old_q = self.getQValue(state, action)
-        new_q = ((1 - lr) * old_q) + (alpha * target)
+        new_q = ((1 - lr) * old_q) + (lr * target)
     
 
     def utility_function(self, reward):
-        return (reward ** alpha) if reward > 0 else (-self.lamda * (reward ** alpha))
+        """
+            Modifies reward using CPT risk-sensitivity parameters
+        """
+        alpha = self.alpha
+        if reward >= 0:
+            return reward ** alpha
+        else:
+            return -self.lamda * ((-reward) ** alpha)
+        
+    def weight_function(self, p, mode):
+        """
+            Apply Tversky-Kahneman probability weighting function
+        """
+        gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
+        return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
+
+    def distort_transition_probs(self, prob_dict):
+        """
+            Given objective transition probabilities, return weighted CPT probabilities
+            using weight function
+        """
+        #need to write
+
+    def getAction(self, state):
+        """
+            Choose an action for a given state using the exploration rate
+            When exploiting, use computeActionFromQValues
+        """
+        legalActions = self.getLegalActions(state) #is this written yet?
+        action = None
+
+        #If at terminal state no legal actions can be taken
+        if not self.getLegalActions(state):
+            return None
+        
+        #Choose explore or exploit based on exploration rate epsilon
+        epsilon = self.epsilon
+        explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
+        if explore == True:
+            actions_list = []
+            for action in self.getLegalActions(state):
+                actions_list.append(action)
+                action = random.choice(actions_list)
+        else:
+            action = self.getPolicy(state)
+        return action
+    
+    def computeActionFromQValues(self, state):
+        """
+            Compute best action to take in a state. Will need to add 
+            belief distribution for multi-agent CPT 
+        """
+        #If at terminal state no legal actions can be taken
+        if not self.getLegalActions(state):
+            return None
+        
+        best_value = -float('inf') #may reduce to high int for speed?
+        for action in self.getLegalActions(state):
+            value = self.getQValue(state, action)
+            best_value = max(best_value, value)
+            if best_value == value:
+                best_action = action
+        return best_action
+    
+    def computeValueFromQValues(self, state):
+        """
+            Currently returns max_action Q(state, action) where max is over legal actions.
+            Need to update for CPT
+        """
+        #If at terminal state no legal actions can be taken
+        if not self.getLegalActions(state):
+            return None # or maybe 0.0?
+        
+        #need to change for CPT
+        best_value = -float('inf')
+        for action in self.getLegalActions(state):
+            value = self.getQValue(state, action)
+            best_value = max(best_value,value)
+        return best_value
+        
+    def getPolicy(self, state):
+        return self.computeActionFromQValues(state)
+    
+    # May be redundant
+    def getValue(self, state):
+        return self.computeValueFromQValues(state)
 
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
 agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
