@@ -131,49 +131,13 @@ class Agent:
         """
         return self.qtable[self.agent_pos][action]
     
-    def updateQ(self, action, next_state, reward):
-        """
-            Performs the CPT-based Q-value update
-        """
-        u_r = self.utility_function(reward)
-
-        next_q = self.computeValueFromQValues(next_state) #need to verify will work
-        target = u_r + (discount * next_q)
-        old_q = self.getQValue(action)
-        new_q = ((1 - lr) * old_q) + (lr * target)
-
-        return new_q
-
-    def utility_function(self, reward):
-        """
-            Modifies reward using CPT risk-sensitivity parameters
-        """
-        alpha = self.alpha
-        if reward >= 0:
-            return reward ** alpha
-        else:
-            return -self.lamda * ((-reward) ** alpha)
-        
-    def weight_function(self, p, mode):
-        """
-            Apply Tversky-Kahneman probability weighting function
-        """
-        gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
-        return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
-
-    def distort_transition_probs(self, prob_dict):
-        """
-            Given objective transition probabilities, return weighted CPT probabilities
-            using weight function
-        """
-        #need to write
-
     def getAction(self):
         """
             Choose an action for a given state using the exploration rate
             When exploiting, use computeActionFromQValues
         """
-
+        
+        legalActions = self.getLegalActions()
         action = None
 
         #If at terminal state no legal actions can be taken
@@ -189,6 +153,82 @@ class Agent:
 
         return action
 
+    def updateQ(self, action, next_state, reward):
+        """
+            Performs the CPT-based Q-value update
+            Will need to update with calling the rho_cpt
+        """
+        u_r = self.value_function(reward)
+
+        samples = sample_outcomes(action)
+        cpt_value = rho_cpt(samples)
+        next_q = self.computeValueFromQValues(next_state) #need to verify will work
+        target = u_r + (discount * next_q)
+        old_q = self.getQValue(action)
+        new_q = ((1 - lr) * old_q) + (lr * target)
+
+        return new_q #or maybe update dictionary directly from here?Yes
+
+    def sample_outcomes(self, state, action, n_samples=50):
+        samples
+
+    def rho_cpt(Y):
+       """
+            Compute CPT value of a discrete random variable Y given samples
+            'samples' is a _ of outcomes (comprised of rewards + discounted future values)
+       """ 
+        X = np.array(samples)
+        X_sort = np.sort(samples)
+        N_max = len(sorted_samples)
+
+
+        rho_plus = 0
+        rho_minus = 0
+
+        alpha = self.alpha
+        lamda = self.lamda
+        g_g = self.gamma_gain
+        g_l = self.gamma_loss 
+
+
+        for ii in range(0, N_max):
+            z_1 = (N_max + ii - 1) / N_max
+            z_2 = (N_max - ii) / N_max
+            z_3 = ii / N_max
+            z_4 = (ii-1) / N_max
+            rho_plus = rho_plus + max(0, X_sort[ii])**alpha * (z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g))
+            rho_minus = rho_minus + (-lamda * max(0, -X_sort[ii])**alpha) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
+        rho = rho_plus - rho_minus
+
+        return rho
+
+
+
+    # Following two functions may be redundant unless used in belief distribution for multi-agent case    
+    def value_function(self, reward):
+        """
+            Modifies reward using CPT risk-sensitivity parameters
+        """
+        alpha = self.alpha
+        if reward >= 0:
+            return reward ** alpha
+        else:
+            return -self.lamda * ((-reward) ** alpha)
+
+    def weight_function(self, p, mode):
+        """
+            Apply Tversky-Kahneman probability weighting function
+        """
+        gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
+        return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
+
+    def distort_transition_probs(self, prob_dict):
+        """
+            Given objective transition probabilities, return weighted CPT probabilities
+            using weight function
+        """
+        #need to write
+        
     def computeValueFromQValues(self):
         """
             Currently returns max_action Q(state, action) where max is over legal actions.
