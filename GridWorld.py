@@ -11,37 +11,8 @@ import random
 #The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
 parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
-parser.addargument("episodes", type=int, help="The number of episodes to undergo during training")
+parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
 args = parser.parse_args()
-
-#Right now there is 1 agent
-n_agents = 1
-num_episodes = args.episodes
-all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
-
-#Q-learning Definitions
-alpha = 0.88
-beta = 0.88
-lr = 0.2
-discount = 0.95
-epsilon = 1.0
-min_epsilon = 0.05
-decay_rate = 0.995
-# Note: will need to update epsilon per episode using
-#       agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
-
-#An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
-totObs = []
-
-Obs1 = [(r, c) for r in range(0,(args.size//4)) for c in range(args.size)]
-totObs.extend(Obs1)
-
-Obs2 = [(r, c) for r in range((args.size//2), args.size) for c in range((args.size//2))]
-totObs.extend(Obs2)
-
-Obs3 = [(r, c) for r in range((args.size//2),args.size) for c in range(((args.size*3)//4),args.size)]
-totObs.extend(Obs3)
-
 
 #This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
@@ -95,6 +66,13 @@ class FlatGridWorld:
 
         plt.grid(True)
 
+    def transProb(self, state, next_state, action):
+        """
+        Returns the probability of transitioning to state s_ t + 1 given state s_t and action a_t. 
+        """
+        
+
+
     #Update world will take in an agent and a new position and update that agents position according to 
     #grid spaces where the agent is allowed to move to. 
     def updateWorld(self, agent, new_pos):
@@ -105,7 +83,7 @@ class FlatGridWorld:
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
 class Agent:
-    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma_gain, gamma_loss, qtable):
+    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma_gain, gamma_loss):
         self.agent_n = agent_n
         self.start = start
         self.agent_pos = agent_pos
@@ -124,40 +102,26 @@ class Agent:
     def reset(self):
         self.agent_pos = self.start
         return self.agent_pos
-
-    #Returns available squares which an agent may legally move to for any given agent. 
-    def availableSqrs(self):
-        self.valid = [(self.agent_pos[0] + 1, self.agent_pos[1]), 
-        (self.agent_pos[0] - 1, self.agent_pos[1]), 
-        (self.agent_pos[0], self.agent_pos[1] + 1),
-        (self.agent_pos[0], self.agent_pos[1] - 1),
-        (self.agent_pos[0] + 1, self.agent_pos[1] + 1),
-        (self.agent_pos[0] - 1, self.agent_pos[1] + 1),
-        (self.agent_pos[0] + 1, self.agent_pos[1] - 1),
-        (self.agent_pos[0] - 1, self.agent_pos[1] - 1)]
-
-        for i in self.valid:
-            if i in totObs or (i[0]>args.size) and (i[1]>args.size):
-                self.valid.remove(i)
-        
-        return self.valid
         
     def getLegalActions(self):
         legal_actions = []
-        for i in self.availableSqrs():
+        for i in self.neighboringSqrs():
             if i[0] > self.agent_pos[0]:
-                legal_actions.append("down")
+                legal_actions.append((1,0))
             if i[0] < self.agent_pos[0]:
-                legal_actions.append("up")
+                legal_actions.append((-1,0))
             if i[1] > self.agent_pos[1]:
-                legal_actions.append("right")
+                legal_actions.append((0,1))
             if i[1] < self.agent_pos[1]:
-                legal_actions.append("left")
+                legal_actions.append((0,-1))
 
         if self.agent_pos == env.goal:
             legal_actions = [0]
             return legal_actions
         else:
+            for i in legal_actions:
+                if i in totObs or (i[0]>args.size) and (i[1]>args.size):
+                    legal_actions.remove(i)
             return legal_actions
             
     def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
@@ -209,8 +173,7 @@ class Agent:
             Choose an action for a given state using the exploration rate
             When exploiting, use computeActionFromQValues
         """
-        
-        legalActions = self.getLegalActions()
+
         action = None
 
         #If at terminal state no legal actions can be taken
@@ -225,31 +188,14 @@ class Agent:
             action = self.getPolicy(self.agent_pos)
 
         return action
-    
-    def computeActionFromQValues(self):
-        """
-            Compute best action to take in a state. Will need to add 
-            belief distribution for multi-agent CPT 
-        """
-        #If at terminal state no legal actions can be taken
-        if not self.getLegalActions():
-            return None
-        
-        best_value = -float('inf') #may reduce to high int for speed?
-        for action in self.getLegalActions(self.agent_pos):
-            value = self.getQValue(self.agent_pos, action)
-            best_value = max(best_value, value)
-            if best_value == value:
-                best_action = action
-        return best_action
-    
+
     def computeValueFromQValues(self):
         """
             Currently returns max_action Q(state, action) where max is over legal actions.
             Need to update for CPT
         """
         #If at terminal state no legal actions can be taken
-        if not self.getLegalActions(self.agent_pos):
+        if self.getLegalActions() == [0]:
             return None # or maybe 0.0?
         
         #need to change for CPT
@@ -257,21 +203,100 @@ class Agent:
         for action in self.getLegalActions():
             value = self.getQValue(action)
             best_value = max(best_value,value)
+
         return best_value
         
     def getPolicy(self):
-        return self.computeActionFromQValues()
+        """
+            Compute best action to take in a state. Will need to add 
+            belief distribution for multi-agent CPT 
+        """
+        best_value = -float('inf') #may reduce to high int for speed?
+        for action in self.getLegalActions():
+            value = self.getQValue(self.agent_pos, action)
+            best_value = max(best_value, value)
+            if best_value == value:
+                best_action = action
+
+        return best_action
     
-    # May be redundant
-    def getValue(self):
-        return self.computeValueFromQValues()
+
+#Returns available squares which an agent may legally move to for any given agent. 
+def neighboringSqrs(state):
+    valid = [(state[0] + 1, state[1]), 
+    (state[0] - 1, state[1]), 
+    (state[0], state[1] + 1),
+    (state[0], state[1] - 1)]
+    #(state + 1, state + 1),
+    #(state - 1, state + 1),
+    #(state + 1, state - 1),
+    #(state - 1, state - 1)]
+    
+    return valid
+
+
+"""
+Main function starts here
+"""
+#Right now there is 1 agent
+n_agents = 1
+num_episodes = args.episodes
+all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
+action_set = ("up", "down", "left", "right")
+n_actions = len(action_set)
+n_states = len(all_sqrs)
+
+tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
+for r,c in product(range(args.size), repeat = 2):
+    for a in action_set:
+        tp[(r,c)][a] = {}
+        for n in neighboringSqrs((r,c)):
+            tp[(r,c)][a][n] = 0
+
+#Q-learning Definitions
+alpha = 0.88
+beta = 0.88
+lr = 0.2
+discount = 0.95
+epsilon = 1.0
+min_epsilon = 0.05
+decay_rate = 0.995
+# Note: will need to update epsilon per episode using
+#       agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
+
+#An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
+totObs = []
+
+Obs1 = [(r, c) for r in range(0,(args.size//4)) for c in range(args.size)]
+totObs.extend(Obs1)
+
+Obs2 = [(r, c) for r in range((args.size//2), args.size) for c in range(0,(args.size//2))]
+totObs.extend(Obs2)
+
+Obs3 = [(r, c) for r in range((args.size//2),args.size) for c in range(((args.size*3)//4),args.size)]
+totObs.extend(Obs3)
 
 env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
-agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma = 0)]
+agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma_gain = 0, gamma_loss = 0)]
 
 #Show the visualization
 plt.ion()
 plt.show()
+
+
+"""
+Learning Flow
+
+getAction() -> In terms of exploit/explore and transition probability. 
+
+getReward() -> In terms of current state, action, and transition probability. 
+
+updateQ() -> In terms of current state, action, future states and distorted transition probability. 
+
+updateWorld() -> Update agent states and visualization. 
+
+"""
+
 
 for i in range(num_episodes):
     agents[0].reset()
