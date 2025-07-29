@@ -169,7 +169,7 @@ class Agent:
         # Note: samples should include full reward and discounted (using gamma) future returns
         return samples
 
-    def rho_cpt(samples):
+    def rho_cpt(self, samples):
        """
             Compute CPT value of a discrete random variable Y given samples
             'samples' is a _ of outcomes (comprised of rewards + discounted future values)
@@ -177,7 +177,7 @@ class Agent:
         
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
-        N_max = len(sorted_samples)
+        N_max = len(X_sort)
 
 
         rho_plus = 0
