@@ -92,10 +92,12 @@ class Agent:
         self.lamda = lamda
         self.gamma_gain = gamma_gain
         self.gamma_loss = gamma_loss
-        self.qtable = {
-            coord: {"up": 0, "down": 0, "left": 0, "right": 0}
-            for coord in all_sqrs
-        }
+
+        self.qtable = {(r,c): {} for r,c in product(range(12), repeat = 2)}
+        for r,c in product(range(12), repeat = 2):
+            for a in neighboringSqrs((r,c)):
+                tp[(r,c)][(a[0] - r, a[1] - c)] = 0
+
         self.reset()
 
     #Reset is called at the end of the initializing function to ensure the agents are at the right starting points
@@ -119,9 +121,6 @@ class Agent:
             legal_actions = [0]
             return legal_actions
         else:
-            for i in legal_actions:
-                if i in totObs or (i[0]>args.size) and (i[1]>args.size):
-                    legal_actions.remove(i)
             return legal_actions
             
     def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
@@ -137,7 +136,6 @@ class Agent:
             When exploiting, use computeActionFromQValues
         """
         
-        legalActions = self.getLegalActions()
         action = None
 
         #If at terminal state no legal actions can be taken
@@ -153,27 +151,26 @@ class Agent:
 
         return action
 
-    def updateQ(self, action, next_state, reward): #remove reward parameter if included in samples
+    def updateQ(self, action): #remove reward parameter if included in samples
         """
             Performs the CPT-based Q-value update
             Will need to update with calling the rho_cpt
         """
-        samples = sample_outcomes(action)
-        target = rho_cpt(samples)
+        samples = self.sample_outcomes(action)
+        target = self.rho_cpt(samples)
         old_q = self.getQValue(action)
         new_q = ((1 - lr) * old_q) + (lr * target)
-        self.qtable[(self.agent_pos, action)] = new_q #make sure correct syntax
-        return new_q #or maybe update dictionary directly from here?Yes
+        self.qtable[self.agent_pos, action] = new_q #make sure correct syntax
 
     def sample_outcomes(self, state, action, n_samples=50):
         # Note: samples should include full reward and discounted (using gamma) future returns
         return samples
 
     def rho_cpt(self, samples):
-       """
-            Compute CPT value of a discrete random variable Y given samples
-            'samples' is a _ of outcomes (comprised of rewards + discounted future values)
-       """ 
+        """
+                Compute CPT value of a discrete random variable Y given samples
+                'samples' is a _ of outcomes (comprised of rewards + discounted future values)
+        """ 
         
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
@@ -270,6 +267,10 @@ def neighboringSqrs(state):
     #(state + 1, state - 1),
     #(state - 1, state - 1)]
     
+    for i in valid:
+        if (i[0] + state[0], i[1] + state[1]) in totObs or (i[0] + state[0]>args.size) or (i[1] + state[1]>args.size):
+            valid.remove(i)
+
     return valid
 
 
