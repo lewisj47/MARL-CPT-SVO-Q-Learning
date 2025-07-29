@@ -7,6 +7,7 @@ import numpy as np
 from itertools import product
 import argparse
 import random
+from copy import deepcopy # may need to pip install
 
 #The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
@@ -124,7 +125,7 @@ class Agent:
                     legal_actions.remove(i)
             return legal_actions
             
-    def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
+    def getQValue(self, action): #takes state as coord tuple and action as vector tuple
         """
             Returns Q(state, action)
             Note: need to make sure it returns zero if state is new
@@ -134,10 +135,8 @@ class Agent:
     def getAction(self):
         """
             Choose an action for a given state using the exploration rate
-            When exploiting, use computeActionFromQValues
+            When exploiting, use getPolicy()
         """
-        
-        legalActions = self.getLegalActions()
         action = None
 
         #If at terminal state no legal actions can be taken
@@ -153,33 +152,55 @@ class Agent:
 
         return action
 
-    def updateQ(self, action, next_state, reward): #remove reward parameter if included in samples
+    def updateQ(self, action, q_old):
         """
-            Performs the CPT-based Q-value update
-            Will need to update with calling the rho_cpt
+            Performs the CPT-based Q-value update by using samples for the estimated future Q-value
         """
-        samples = sample_outcomes(action)
-        target = rho_cpt(samples)
-        old_q = self.getQValue(action)
-        new_q = ((1 - lr) * old_q) + (lr * target)
-        self.qtable[(self.agent_pos, action)] = new_q #make sure correct syntax
-        return new_q #or maybe update dictionary directly from here?Yes
+        samples = self.sample_outcomes(action, q_old)
+        target = self.rho_cpt(samples)
+        current_q = self.getQValue(action)
+        new_q = ((1 - lr) * current_q) + (lr * target)
+        self.qtable[self.agent_pos][action] = new_q 
 
-    def sample_outcomes(self, state, action, n_samples=50):
-        # Note: samples should include full reward and discounted (using gamma) future returns
+    def sample_outcomes(self, action, q_old, n_samples=50):
+        """
+            Using the current state and passed action and dictionary of transition probabilities,
+            compiles a list of samples for future Q-values to be modified using CPT and then used
+            in the updateQ function
+        """
+        samples = []
+        
+        try:
+            next_state_probs = tp[self.agent_pos][action]
+        except KeyError:
+            return [0.0] * n_samples # if (state, action) pair is not found
+
+        next_states = list(next_state_probs.keys())
+        probs = list(next_state_probs.values())
+
+        for _ in range(n_samples):
+            s_prime = random.choices(next_states, weights=probs, k=1)[0]
+
+            reward = getReward(self.agent_pos, action)
+            legal_actions = list(q_old[s_prime].keys()) if s_prime in q_old else []
+            v_s_prime = max([q_old[s_prime][a] for a in legal_actions], default=0.0)
+
+            full_return = reward + (self.gamma * v_s_prime) + random.gauss(0,1)
+
+            samples.append(full_return)
+
         return samples
+        
 
     def rho_cpt(self, samples):
-       """
-            Compute CPT value of a discrete random variable Y given samples
-            'samples' is a _ of outcomes (comprised of rewards + discounted future values)
-       """ 
-        
+        """
+            Compute CPT-value of a discrete random variable X given samples
+            'samples' is a list of outcomes (comprised of rewards + discounted future values)
+        """ 
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
         N_max = len(X_sort)
-
-
+       
         rho_plus = 0
         rho_minus = 0
 
@@ -202,11 +223,9 @@ class Agent:
 
 
 
-    # Following two functions may be redundant unless used in belief distribution for multi-agent case    
+    # Following two functions may be redundant unless used in belief distribution for multi-agent case
+    """    
     def value_function(self, reward):
-        """
-            Modifies reward using CPT risk-sensitivity parameters
-        """
         alpha = self.alpha
         if reward >= 0:
             return reward ** alpha
@@ -214,35 +233,9 @@ class Agent:
             return -self.lamda * ((-reward) ** alpha)
 
     def weight_function(self, p, mode):
-        """
-            Apply Tversky-Kahneman probability weighting function
-        """
         gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
         return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
-
-    def distort_transition_probs(self, prob_dict):
-        """
-            Given objective transition probabilities, return weighted CPT probabilities
-            using weight function
-        """
-        #need to write
-        
-    def computeValueFromQValues(self):
-        """
-            Currently returns max_action Q(state, action) where max is over legal actions.
-            Need to update for CPT
-        """
-        #If at terminal state no legal actions can be taken
-        if self.getLegalActions() == [0]:
-            return None # or maybe 0.0?
-        
-        #need to change for CPT
-        best_value = -float('inf')
-        for action in self.getLegalActions():
-            value = self.getQValue(action)
-            best_value = max(best_value,value)
-
-        return best_value
+    """
         
     def getPolicy(self):
         """
@@ -271,6 +264,10 @@ def neighboringSqrs(state):
     #(state - 1, state - 1)]
     
     return valid
+
+
+def getReward(state, action):
+    return reward
 
 
 """
