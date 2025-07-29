@@ -7,7 +7,6 @@ import numpy as np
 from itertools import product
 import argparse
 import random
-from copy import deepcopy # may need to pip install
 
 #The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
@@ -67,19 +66,16 @@ class FlatGridWorld:
 
         plt.grid(True)
 
-    def transProb(self, state, next_state, action):
-        """
-        Returns the probability of transitioning to state s_ t + 1 given state s_t and action a_t. 
-        """
-        
-
 
     #Update world will take in an agent and a new position and update that agents position according to 
     #grid spaces where the agent is allowed to move to. 
-    def updateWorld(self, agent, new_pos):
+    def updateWorld(self, agent, chosen_action):
         for i in range(n_agents):
-            if new_pos  in agent.availableSqrs():
-                agent.agent_pos = new_pos
+            if chosen_action in agent.getLegalActions():
+                chosen_action = random.choices(list(tp[self.agent_pos][chosen_action].keys()), weights=list(tp[self.agent_pos][chosen_action].values()), k=1)[0]
+                agent.agent_pos = chosen_action
+        t += 1
+
 
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
@@ -124,7 +120,7 @@ class Agent:
         else:
             return legal_actions
             
-    def getQValue(self, action): #takes state as coord tuple and action as vector tuple
+    def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
         """
             Returns Q(state, action)
             Note: need to make sure it returns zero if state is new
@@ -134,7 +130,7 @@ class Agent:
     def getAction(self):
         """
             Choose an action for a given state using the exploration rate
-            When exploiting, use getPolicy()
+            When exploiting, use computeActionFromQValues
         """
         
         action = None
@@ -152,56 +148,32 @@ class Agent:
 
         return action
 
-
-    def updateQ(self, action, q_old):
+    def updateQ(self, action): #remove reward parameter if included in samples
         """
-            Performs the CPT-based Q-value update by using samples for the estimated future Q-value
+            Performs the CPT-based Q-value update
+            Will need to update with calling the rho_cpt
         """
-        samples = self.sample_outcomes(action, q_old)
+        samples = self.sample_outcomes(action)
         target = self.rho_cpt(samples)
-        current_q = self.getQValue(action)
-        new_q = ((1 - lr) * current_q) + (lr * target)
-        self.qtable[self.agent_pos][action] = new_q 
+        old_q = self.getQValue(action)
+        new_q = ((1 - lr) * old_q) + (lr * target)
+        self.qtable[self.agent_pos, action] = new_q #make sure correct syntax
 
-    def sample_outcomes(self, action, q_old, n_samples=50):
-        """
-            Using the current state and passed action and dictionary of transition probabilities,
-            compiles a list of samples for future Q-values to be modified using CPT and then used
-            in the updateQ function
-        """
-        samples = []
-        
-        try:
-            next_state_probs = tp[self.agent_pos][action]
-        except KeyError:
-            return [0.0] * n_samples # if (state, action) pair is not found
-
-        next_states = list(next_state_probs.keys())
-        probs = list(next_state_probs.values())
-
-        for _ in range(n_samples):
-            s_prime = random.choices(next_states, weights=probs, k=1)[0]
-
-            reward = getReward(self.agent_pos, action)
-            legal_actions = list(q_old[s_prime].keys()) if s_prime in q_old else []
-            v_s_prime = max([q_old[s_prime][a] for a in legal_actions], default=0.0)
-
-            full_return = reward + (self.gamma * v_s_prime) + random.gauss(0,1)
-
-            samples.append(full_return)
+    def sample_outcomes(self, state, action, n_samples=50):
+        # Note: samples should include full reward and discounted (using gamma) future returns
         return samples
-        
 
     def rho_cpt(self, samples):
         """
-            Compute CPT-value of a discrete random variable X given samples
-            'samples' is a list of outcomes (comprised of rewards + discounted future values)
+                Compute CPT value of a discrete random variable Y given samples
+                'samples' is a _ of outcomes (comprised of rewards + discounted future values)
         """ 
-
+        
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
         N_max = len(X_sort)
-       
+
+
         rho_plus = 0
         rho_minus = 0
 
@@ -224,19 +196,47 @@ class Agent:
 
 
 
-    # Following two functions may be redundant unless used in belief distribution for multi-agent case
-    """    
+    # Following two functions may be redundant unless used in belief distribution for multi-agent case    
     def value_function(self, reward):
-        alpha = self.alpha
+        """
+            Modifies reward using CPT risk-sensitivity parameters
+        """
         if reward >= 0:
-            return reward ** alpha
+            return reward ** self.alpha
         else:
-            return -self.lamda * ((-reward) ** alpha)
+            return -self.lamda * ((-reward) ** self.alpha)
 
     def weight_function(self, p, mode):
+        """
+            Apply Tversky-Kahneman probability weighting function
+        """
         gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
+
         return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
-    """
+
+    def distort_transition_probs(self):
+        """
+            Given objective transition probabilities, return weighted CPT probabilities
+            using weight function
+        """
+        #need to write
+        
+    def computeValueFromQValues(self):
+        """
+            Currently returns max_action Q(state, action) where max is over legal actions.
+            Need to update for CPT
+        """
+        #If at terminal state no legal actions can be taken
+        if self.getLegalActions() == [0]:
+            return None # or maybe 0.0?
+        
+        #need to change for CPT
+        best_value = -float('inf')
+        for action in self.getLegalActions():
+            value = self.getQValue(action)
+            best_value = max(best_value,value)
+
+        return best_value
         
     def getPolicy(self):
         """
@@ -265,16 +265,31 @@ def neighboringSqrs(state):
     #(state - 1, state - 1)]
     
     for i in valid:
-        if (i[0] + state[0], i[1] + state[1]) in totObs or (i[0] + state[0]>args.size) or (i[1] + state[1]>args.size):
+        if (i[0] + state[0]>args.size) or (i[1] + state[1]>args.size):
             valid.remove(i)
 
     return valid
 
+def rewardFunction(state):
+    #The reward function will go in here
 
-def getReward(state, action):
-    return reward
+    const1 = 100
+    const2 = 100
+    const3 = 5
 
+    return(const1 * Obs(state) - const2 * Goal(state) - const3 * t)
 
+def Obs(state):
+    if state in totObs:
+        return 1
+    else:
+        return 0
+
+def Goal(state):
+    if state == env.goal:
+        return 1
+    else: 
+        return 0
 """
 Main function starts here
 """
@@ -286,6 +301,7 @@ action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
 
+t = 0
 
 tp = {(r,c): {} for r,c in product(range(12), repeat = 2)}
 for r,c in product(range(12), repeat = 2):
