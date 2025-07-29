@@ -66,12 +66,7 @@ class FlatGridWorld:
         ax.add_patch(arc)
 
         plt.grid(True)
-
-    def transProb(self, state, next_state, action):
-        """
-        Returns the probability of transitioning to state s_ t + 1 given state s_t and action a_t. 
-        """
-        
+       
 
 
     #Update world will take in an agent and a new position and update that agents position according to 
