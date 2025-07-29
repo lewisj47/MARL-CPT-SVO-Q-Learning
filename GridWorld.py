@@ -282,16 +282,20 @@ Main function starts here
 n_agents = 1
 num_episodes = args.episodes
 all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
-action_set = ("up", "down", "left", "right")
+action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
 
-tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
-for r,c in product(range(args.size), repeat = 2):
+
+tp = {(r,c): {} for r,c in product(range(12), repeat = 2)}
+for r,c in product(range(12), repeat = 2):
     for a in action_set:
         tp[(r,c)][a] = {}
         for n in neighboringSqrs((r,c)):
-            tp[(r,c)][a][n] = 0
+            if ((r + a[0], c + a[1]) == n):
+                tp[(r,c)][a][n] = 0.95
+            else:
+                tp[(r,c)][a][n] = (1 - 0.95)/(len(neighboringSqrs((r,c))) - 1)
 
 #Q-learning Definitions
 alpha = 0.88
