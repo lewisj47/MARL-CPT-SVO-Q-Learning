@@ -153,33 +153,31 @@ class Agent:
 
         return action
 
-    def updateQ(self, action, next_state, reward):
+    def updateQ(self, action, next_state, reward): #remove reward parameter if included in samples
         """
             Performs the CPT-based Q-value update
             Will need to update with calling the rho_cpt
         """
-        u_r = self.value_function(reward)
-
         samples = sample_outcomes(action)
-        cpt_value = rho_cpt(samples)
-        next_q = self.computeValueFromQValues(next_state) #need to verify will work
-        target = u_r + (discount * next_q)
+        target = rho_cpt(samples)
         old_q = self.getQValue(action)
         new_q = ((1 - lr) * old_q) + (lr * target)
-
+        self.qtable[(self.agent_pos, action)] = new_q #make sure correct syntax
         return new_q #or maybe update dictionary directly from here?Yes
 
     def sample_outcomes(self, state, action, n_samples=50):
-        samples
+        # Note: samples should include full reward and discounted (using gamma) future returns
+        return samples
 
-    def rho_cpt(Y):
+    def rho_cpt(self, samples):
        """
             Compute CPT value of a discrete random variable Y given samples
             'samples' is a _ of outcomes (comprised of rewards + discounted future values)
        """ 
+        
         X = np.array(samples)
-        X_sort = np.sort(samples)
-        N_max = len(sorted_samples)
+        X_sort = np.sort(X, axis = None)
+        N_max = len(X_sort)
 
 
         rho_plus = 0
