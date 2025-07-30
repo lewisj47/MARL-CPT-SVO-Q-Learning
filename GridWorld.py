@@ -66,15 +66,16 @@ class FlatGridWorld:
         ax.add_patch(arc)
 
         plt.grid(True)
-       
-
 
     #Update world will take in an agent and a new position and update that agents position according to 
     #grid spaces where the agent is allowed to move to. 
-    def updateWorld(self, agent, new_pos):
+    def updateWorld(self, agent, chosen_action):
         for i in range(n_agents):
-            if new_pos  in agent.availableSqrs():
-                agent.agent_pos = new_pos
+            if chosen_action in agent.getLegalActions():
+                chosen_action = random.choices(list(tp[self.agent_pos][chosen_action].keys()), weights=list(tp[self.agent_pos][chosen_action].values()), k=1)[0]
+                agent.agent_pos = chosen_action
+        t += 1
+
 
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
@@ -119,7 +120,7 @@ class Agent:
         else:
             return legal_actions
             
-    def getQValue(self, action): #takes state as coord tuple and action as vector tuple
+    def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
         """
             Returns Q(state, action)
             Note: need to make sure it returns zero if state is new
@@ -129,7 +130,7 @@ class Agent:
     def getAction(self):
         """
             Choose an action for a given state using the exploration rate
-            When exploiting, use getPolicy()
+            When exploiting, use computeActionFromQValues
         """
         
         action = None
@@ -146,7 +147,6 @@ class Agent:
             action = self.getPolicy(self.agent_pos)
 
         return action
-
 
     def updateQ(self, action, q_old):
         """
@@ -185,7 +185,6 @@ class Agent:
 
             samples.append(full_return)
         return samples
-        
 
     def rho_cpt(self, samples):
         """
@@ -216,11 +215,8 @@ class Agent:
         rho = rho_plus - rho_minus
 
         return rho
-
-
-
-    # Following two functions may be redundant unless used in belief distribution for multi-agent case
-    """    
+    
+    """
     def value_function(self, reward):
         alpha = self.alpha
         if reward >= 0:
@@ -231,13 +227,15 @@ class Agent:
     def weight_function(self, p, mode):
         gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
         return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
-    """
-        
+    
+    """  
+    
     def getPolicy(self):
         """
-            Compute best action to take in a state. Will need to add 
-            belief distribution for multi-agent CPT 
+        Compute best action to take in a state. Will need to add 
+        belief distribution for multi-agent CPT 
         """
+
         best_value = -float('inf') #may reduce to high int for speed?
         for action in self.getLegalActions():
             value = self.getQValue(self.agent_pos, action)
@@ -260,16 +258,31 @@ def neighboringSqrs(state):
     #(state - 1, state - 1)]
     
     for i in valid:
-        if (i[0] + state[0], i[1] + state[1]) in totObs or (i[0] + state[0]>args.size) or (i[1] + state[1]>args.size):
+        if (i[0] + state[0]>args.size) or (i[1] + state[1]>args.size):
             valid.remove(i)
 
     return valid
 
+def rewardFunction(state):
+    #The reward function will go in here
 
-def getReward(state, action):
-    return reward
+    const1 = 100
+    const2 = 100
+    const3 = 5
 
+    return(const1 * Obs(state) - const2 * Goal(state) - const3 * t)
 
+def Obs(state):
+    if state in totObs:
+        return 1
+    else:
+        return 0
+
+def Goal(state):
+    if state == env.goal:
+        return 1
+    else: 
+        return 0
 """
 Main function starts here
 """
@@ -281,6 +294,7 @@ action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
 
+t = 0
 
 tp = {(r,c): {} for r,c in product(range(12), repeat = 2)}
 for r,c in product(range(12), repeat = 2):
