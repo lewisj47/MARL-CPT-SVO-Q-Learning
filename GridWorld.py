@@ -16,7 +16,8 @@ parser.add_argument("size", type = int,  help="The size of the grid environment 
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
 args = parser.parse_args()
 
-end_goal = (args.size - (2 * args.size//3), args.size - 1)
+end_goal = []
+end_goal.extend([(r, c) for c in range(args.size - 1, args.size) for r in range((args.size*1)//4, args.size//2)])
 
 #An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
 totObs = []
@@ -39,12 +40,15 @@ action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
 
+
 #Constants
 C = 0.95
+
 lr = 0.2
 discount = 0.95
 max_epsilon = 1.0
 min_epsilon = 0.01
+
 decay_rate = 0.001
 
 #Global Variables
@@ -52,9 +56,9 @@ t = 0
 t_e = 0
 epsilon = 1
 
-
 def main():
     global epsilon
+    global t_e
     global t
     global t_e
 
@@ -76,12 +80,10 @@ def main():
             plt.ion()
             plt.show()
             plt.pause(0.001)
-
-            """
+           
             if (t > 250):
                 t = 0
                 break
-            """
 
             if agents[0].agent_pos == end_goal:
                 t = 0
@@ -91,6 +93,7 @@ def main():
             if agents[0].agent_pos in totObs:
                 t = 0
                 break
+
 
         epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * t_e)
         t_e += 1
@@ -154,6 +157,7 @@ def rewardFunction(state):
     const2 = 10
     const3 = 1
     const4 = 100
+    
     return(const1 * Goal(state) - const2 * Obs(state) + const4 * (1 / (1 + Dist(state))))
 
 tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
@@ -215,7 +219,9 @@ class FlatGridWorld:
         for i in range(n_agents):
             grid[self.agents[i].agent_pos] = 1.0
 
-        grid[end_goal] = 0.8
+        for coord in product(range(args.size), repeat = 2):
+            if coord in end_goal:
+                grid[coord] = 0.8
 
         grid[(0,1)] = 0.8
 
@@ -338,7 +344,8 @@ class Agent:
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
             #reward = self.getReward(self.agent_pos, action)
             reward = rewardFunction(s_prime)
-            v_s_prime = max([self.qtable[s_prime][a] for a in getLegalActions(s_prime)])
+            v_s_prime = max(self.qtable[s_prime].values(), default = 0.0)
+
             full_return = reward + (discount * v_s_prime) #+ random.gauss(0,1)
 
             samples.append(full_return)
@@ -367,6 +374,7 @@ class Agent:
             rho_plus = rho_plus + max(0, X_sort[ii])**self.alpha * (z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g))
             rho_minus = rho_minus + (-self.lamda * max(0, -X_sort[ii])**self.beta) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
         rho = rho_plus - rho_minus
+
         return rho
     
     # potentially unecessary
