@@ -8,6 +8,7 @@ from itertools import product
 import argparse
 import random
 import pprint
+import math
 
 #The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
@@ -38,24 +39,24 @@ action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
 
+#Constants
 C = 0.95
-
-t = 0
-
-#Q-learning Definitions
 lr = 0.2
 discount = 0.95
-epsilon = 1
 max_epsilon = 1.0
 min_epsilon = 0.01
 decay_rate = 0.001
-# Note: will need to update epsilon per episode using
-#       agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
+
+#Global Variables
+t = 0
+t_e = 0
+epsilon = 1
 
 
 def main():
     global epsilon
     global t
+    global t_e
 
     agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size),0), agent_v = 10, phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
     env = FlatGridWorld(size=args.size, agents=agents, obstacles=(Obs1,Obs2,Obs3))
@@ -76,33 +77,28 @@ def main():
             plt.show()
             plt.pause(0.001)
 
+            """
             if (t > 250):
                 t = 0
                 break
+            """
 
             if agents[0].agent_pos == end_goal:
                 t = 0
+                print("finish")
                 break
             
             if agents[0].agent_pos in totObs:
                 t = 0
                 break
 
-        epsilon = min_epsilon + (max_epsilon - min_epsilon) * 2.718**(-decay_rate * t)
+        epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * t_e)
+        t_e += 1
+        print(t_e)
 
     with open("qtable_output.txt", "w") as f:
         pprint.pprint(agents[0].qtable, stream=f)
 
-def Goal(state):
-    if state == end_goal:
-        return 1
-    else: 
-        return 0
-def Obs(state):
-    if state in totObs:
-        return 1
-    else:
-        return 0
 
 def getLegalActions(state):
         legal_actions = []
@@ -137,14 +133,28 @@ def neighboringSqrs(state):
 
     return valid
 
+def Goal(state):
+    if state == end_goal:
+        return 1
+    else: 
+        return 0
+def Obs(state):
+    if state in totObs:
+        return 1
+    else:
+        return 0
+    
+def Dist(state):
+    dist = math.sqrt((end_goal[1] - state[1])**2 + (end_goal[0] - state[0])**2)
+    return dist / args.size
+
 def rewardFunction(state):
 
-    const1 = 100
-    const2 = 100
+    const1 = 10
+    const2 = 10
     const3 = 1
-    const4 = 10000
-
-    return(const1 * Goal(state) - const2 * Obs(state) + const4 * state[1])
+    const4 = 100
+    return(const1 * Goal(state) - const2 * Obs(state) + const4 * (1 / (1 + Dist(state))))
 
 tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
 
@@ -329,7 +339,7 @@ class Agent:
             #reward = self.getReward(self.agent_pos, action)
             reward = rewardFunction(s_prime)
             v_s_prime = max([self.qtable[s_prime][a] for a in getLegalActions(s_prime)])
-            full_return = reward + (discount * v_s_prime) + random.gauss(0,1)
+            full_return = reward + (discount * v_s_prime) #+ random.gauss(0,1)
 
             samples.append(full_return)
         return samples
@@ -391,14 +401,18 @@ class Agent:
         belief distribution for multi-agent CPT 
         """
 
-        best_value = -float('inf') #may reduce to high int for speed?
+        best_value = -float('inf')
+        best_actions = []
+
         for action in getLegalActions(self.agent_pos):
             value = self.getQValue(action)
-            best_value = max(best_value, value)
-            if best_value == value:
-                best_action = action
+            if value > best_value:
+                best_value = value
+                best_actions = [action]
+            elif value == best_value:
+                best_actions.append(action)
 
-        return best_action
+        return random.choice(best_actions)
 
 """
 Main function starts here
