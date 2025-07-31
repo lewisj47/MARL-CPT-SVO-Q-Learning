@@ -38,7 +38,7 @@ action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
 
-c = 0.95
+C = 0.95
 
 t = 0
 
@@ -47,8 +47,8 @@ lr = 0.2
 discount = 0.95
 epsilon = 1
 max_epsilon = 1.0
-min_epsilon = 0.05
-decay_rate = 0.995
+min_epsilon = 0.01
+decay_rate = 0.001
 # Note: will need to update epsilon per episode using
 #       agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
 
@@ -138,14 +138,13 @@ def neighboringSqrs(state):
     return valid
 
 def rewardFunction(state):
-    #The reward function will go in here
 
     const1 = 100
     const2 = 100
     const3 = 1
     const4 = 10000
 
-    return(const1 * Goal(state) - const2 * Obs(state) + const4 * state[0])
+    return(const1 * Goal(state) - const2 * Obs(state) + const4 * state[1])
 
 tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
 
@@ -160,16 +159,16 @@ for r,c in product(range(args.size), repeat = 2):
         for a in getLegalActions((r,c)):
             for n in neighboringSqrs((r,c)):
                 if ((a[0] + r, a[1] + c) == n):
-                    tp[(r,c)][a][n] = c
+                    tp[(r,c)][a][n] = C
                 else:
-                    tp[(r,c)][a][n] = 1 - c
+                    tp[(r,c)][a][n] = 1 - C
     elif ((r < 0) or (r >= args.size) or (c < 0) or (r >= args.size)):
         for a in getLegalActions((r,c)):
             for n in neighboringSqrs((r,c)):
                 if ((a[0] + r, a[1] + c) == n):
-                    tp[(r,c)][a][n] = c
+                    tp[(r,c)][a][n] = C
                 else:
-                    tp[(r,c)][a][n] = (1 - c)/2
+                    tp[(r,c)][a][n] = (1 - C)/2
     elif ((r,c) == end_goal):
         for a in getLegalActions((r,c)):
             for n in neighboringSqrs((r,c)):
@@ -178,9 +177,9 @@ for r,c in product(range(args.size), repeat = 2):
         for a in getLegalActions((r,c)):
             for n in neighboringSqrs((r,c)):
                 if ((a[0] + r, a[1] + c) == n):
-                    tp[(r,c)][a][n] = c
+                    tp[(r,c)][a][n] = C
                 else:
-                    tp[(r,c)][a][n] = (1 - c)/3
+                    tp[(r,c)][a][n] = (1 - C)/3
 
 #This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
@@ -245,7 +244,7 @@ class FlatGridWorld:
             agent.agent_pos = taken_action
 
         global t
-        print(t)
+        #print(t)
         t += 1
 
 
@@ -267,8 +266,8 @@ class Agent:
         self.qtable = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
 
         for r,c in product(range(args.size), repeat = 2):
-            for a in neighboringSqrs((r,c)):
-                self.qtable[(r,c)][(a[0] - r, a[1] - c)] = 0
+            for a in getLegalActions((r,c)):
+                self.qtable[(r,c)][a] = 0
 
         self.reset()
 
@@ -325,14 +324,11 @@ class Agent:
 
         next_states = list(tp[self.agent_pos][action].keys())
         probs = list((tp[self.agent_pos][action]).values())
-
         for _ in range(n_samples):
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
-
-            reward = self.getReward(action)
-            legal_actions = list(self.qtable[s_prime].keys()) if s_prime in self.qtable else []
-            v_s_prime = max([self.qtable[s_prime][a] for a in legal_actions], default=0.0)
-
+            #reward = self.getReward(self.agent_pos, action)
+            reward = rewardFunction(s_prime)
+            v_s_prime = max([self.qtable[s_prime][a] for a in getLegalActions(s_prime)])
             full_return = reward + (discount * v_s_prime) + random.gauss(0,1)
 
             samples.append(full_return)
@@ -347,27 +343,31 @@ class Agent:
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
         N_max = len(X_sort)
-       
         rho_plus = 0
         rho_minus = 0
 
         g_g = self.gamma_gain
         g_l = self.gamma_loss 
 
-        for ii in range(0, N_max):
-            z_1 = (N_max + ii - 1) / N_max
+        for ii in range(1, N_max):
+            z_1 = (N_max - ii + 1) / N_max
             z_2 = (N_max - ii) / N_max
             z_3 = ii / N_max
             z_4 = (ii-1) / N_max
             rho_plus = rho_plus + max(0, X_sort[ii])**self.alpha * (z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g))
             rho_minus = rho_minus + (-self.lamda * max(0, -X_sort[ii])**self.beta) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
         rho = rho_plus - rho_minus
-
         return rho
     
-    def getReward(self, action):
-        for i in neighboringSqrs(self.agent_pos):
-            tot_reward = tp[self.agent_pos][action][i] * rewardFunction(i)
+    # potentially unecessary
+    def getReward(self, state, action):
+        if action not in tp[state]:
+            # action doesn't work with state (invalid state/action pair)
+            print(f"Warning: action {action} not in tp[{state}]")
+            return 0
+        tot_reward = 0
+        for next_state, prob in tp[state][action].items(): # note: items() returns dict key-value pairs as tuples
+            tot_reward += prob * rewardFunction(next_state)
         
         return tot_reward  
     
