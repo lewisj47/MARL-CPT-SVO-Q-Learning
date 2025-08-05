@@ -60,7 +60,6 @@ def main():
     global epsilon
     global t_e
     global t
-    global t_e
 
     agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size),0), agent_v = 10, phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
     env = FlatGridWorld(size=args.size, agents=agents, obstacles=(Obs1,Obs2,Obs3))
@@ -85,7 +84,7 @@ def main():
                 t = 0
                 break
 
-            if agents[0].agent_pos == end_goal:
+            if agents[0].agent_pos in end_goal:
                 t = 0
                 print("finish")
                 break
@@ -148,17 +147,15 @@ def Obs(state):
         return 0
     
 def Dist(state):
-    dist = math.sqrt((end_goal[1] - state[1])**2 + (end_goal[0] - state[0])**2)
+    dist = min(math.sqrt((i[1] - state[1])**2 + (i[0] - state[0])**2) for i in end_goal)
     return dist / args.size
 
 def rewardFunction(state):
 
-    const1 = 10
+    const1 = 100
     const2 = 10
-    const3 = 1
-    const4 = 100
-    
-    return(const1 * Goal(state) - const2 * Obs(state) + const4 * (1 / (1 + Dist(state))))
+    const3 = 100
+    return(const1 * Goal(state) - const2 * Obs(state) + const3 * (1 / (1 + Dist(state))))
 
 tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
 
@@ -216,13 +213,13 @@ class FlatGridWorld:
             if coord in totObs:
                 grid[coord] = -1
 
-        for i in range(n_agents):
-            grid[self.agents[i].agent_pos] = 1.0
-
         for coord in product(range(args.size), repeat = 2):
             if coord in end_goal:
                 grid[coord] = 0.8
 
+        for i in range(n_agents):
+            grid[self.agents[i].agent_pos] = 1.0
+  
         grid[(0,1)] = 0.8
 
         cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
@@ -260,7 +257,6 @@ class FlatGridWorld:
             agent.agent_pos = taken_action
 
         global t
-        #print(t)
         t += 1
 
 
@@ -340,9 +336,9 @@ class Agent:
 
         next_states = list(tp[self.agent_pos][action].keys())
         probs = list((tp[self.agent_pos][action]).values())
+
         for _ in range(n_samples):
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
-            #reward = self.getReward(self.agent_pos, action)
             reward = rewardFunction(s_prime)
             v_s_prime = max(self.qtable[s_prime].values(), default = 0.0)
 
