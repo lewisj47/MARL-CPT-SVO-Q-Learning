@@ -2,7 +2,6 @@
 
 import matplotlib.pyplot as plt
 from matplotlib import colors
-from matplotlib.patches import Arc
 import numpy as np
 from itertools import product
 import argparse
@@ -13,35 +12,46 @@ from tqdm import tqdm
 
 #The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
 parser = argparse.ArgumentParser()
-parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
 args = parser.parse_args()
 
 end_goal = []
-end_goal.extend([(r, c) for c in range(args.size - 1, args.size) for r in range((args.size*1)//4, args.size//2)])
-route_1 = [(10, r) for r in range(0, 23)]
+#end_goal.extend([(r, c) for c in range(23, 24) for r in range(9, 15)])
+end_goal.extend([(r, c) for c in range(9,15) for r in range(23, 24)])
 
-#end_goal = [(r, c) for r in range(args.size - 1, args.size) for c in range(args.size//2, (args.size*3)//4)]
-route_2 = [(r, 8) for r in range(0,13)]
-route_2.append((13, c) for c in range(10, 23))
+routes = {}
+route_1 = [(13, r) for r in range(0, 23)]
+lane_1 = [(r,c) for r in range(12,14) for c in range(0,23)]
+
+route_2 = [(13,r) for r in range (0, 10)]
+lane_2 = [(r,c) for r in range(12,15) for c in range(0,12)]
+route_2.extend([(r,10) for r in range(13,23)])
+lane_2.extend([(r,c) for r in range(13,23) for c in range(9,12)])
+
+routes["1"] = {"Route": route_1, "Lane": lane_1}
+routes["2"] = {"Route": route_2, "Lane": lane_2}
+
 
 #An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
 totObs = []
 
-Obs1 = [(r, c) for r in range(0,(args.size//4)) for c in range(args.size)]
+Obs1 = [(r, c) for r in range(0,9) for c in range(0,9)]
 totObs.extend(Obs1)
 
-Obs2 = [(r, c) for r in range((args.size//2), args.size) for c in range(0,(args.size//2))]
+Obs2 = [(r, c) for r in range(15, 24) for c in range(0,9)]
 totObs.extend(Obs2)
 
-Obs3 = [(r, c) for r in range((args.size//2),args.size) for c in range(((args.size*3)//4),args.size)]
+Obs3 = [(r, c) for r in range(15,24) for c in range(15,24)]
 totObs.extend(Obs3)
+
+Obs4 = [(r, c) for r in range (0, 9) for c in range(15, 24)]
+totObs.extend(Obs4)
 
 #Environment Definitions
 n_agents = 1
 num_episodes = args.episodes
-all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
-corner_sqrs = [(0,0),(0,args.size), (args.size, 0), (args.size, args.size)]
+all_sqrs = [(r,c) for r in range(24) for c in range(24)]
+corner_sqrs = [(0,0),(0,23), (23, 0), (23, 23)]
 action_set = [(1,0),(0,1),(-1,0),(0,-1)]
 n_actions = len(action_set)
 n_states = len(all_sqrs)
@@ -56,8 +66,9 @@ lr = 0.2
 discount = 0.9
 max_epsilon = 1.0
 min_epsilon = 0.01
+target_epsilon = 0.011
 
-decay_rate = 0.001
+decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / args.episodes
 
 #Global Variables
 t = 0
@@ -70,8 +81,8 @@ def main():
     global t
     global finish_n
 
-    agents = [Agent(agent_n = 1, start = (9, 0), agent_pos = (int(args.size - (2/3) * args.size),0), agent_speed = 1, agent_dir = 1, phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
-    env = FlatGridWorld(size=args.size, agents=agents, obstacles=(Obs1,Obs2,Obs3))
+    agents = [Agent(agent_n = 1, start = (13, 0), agent_pos = (0,0), agent_speed = 1, agent_dir = 1, phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
+    env = FlatGridWorld(size=24, agents=agents, obstacles=(Obs1,Obs2,Obs3))
     
     for i in tqdm(range(num_episodes)):
         agents[0].reset()
@@ -104,10 +115,9 @@ def main():
 
 
         epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * t_e)
-        print(epsilon)
         t_e += 1
 
-    print(f"Agent reached the goal {finish_n} times, {finish_n / args.episodes}% of all episodes.")
+    print(f"Agent reached the goal {finish_n} times, {(finish_n / args.episodes) * 100}% of all episodes.")
 
     with open("qtable_output.txt", "w") as f:
         pprint.pprint(agents[0].qtable, stream=f)
@@ -131,12 +141,12 @@ def neighboringSqrs(state):
     (state[0], state[1] + 1),
     (state[0], state[1] - 1)]
     
-    valid = [i for i in valid if 0 <= i[0] < args.size and 0 <= i[1] < args.size]
+    valid = [i for i in valid if 0 <= i[0] < 24 and 0 <= i[1] < 24]
 
     return valid
 
 neighbor_cache = {
-    (r, c): neighboringSqrs((r, c)) for r, c in product(range(args.size), repeat=2)
+    (r, c): neighboringSqrs((r, c)) for r, c in product(range(24), repeat=2)
 }
 
 def getLegalActions(state):
@@ -158,7 +168,7 @@ def getLegalActions(state):
             return legal_actions
 
 legal_actions_cache = {
-    (r, c): getLegalActions((r, c)) for r, c in product(range(args.size), repeat=2)
+    (r, c): getLegalActions((r, c)) for r, c in product(range(24), repeat=2)
 }
     
 def Dist(state):
@@ -166,27 +176,29 @@ def Dist(state):
     return dist
 
 def onRoute(state, route):
-    if state in route:
-        return route.index(state)
-    else:
+    if state in route["Route"]:
+        return (route["Route"].index(state)/24)
+    elif state in route["Lane"]:
         return 0
+    else:
+        return -0.7
 
 def rewardFunction(state):
     const1 = 1000
-    const2 = 200
-    const4 = 50
+    const2 = 100
+    const4 = 10
     
-    return(const1 * Goal(state) - const2 * Obs(state) + const4 * onRoute(state, route_1))
+    return(const1 * Goal(state) - const2 * Obs(state) + const4 * onRoute(state, routes['2']))
 
-tp = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
+tp = {(r,c): {} for r,c in product(range(24), repeat = 2)}
 
-for r,c in product(range(args.size), repeat = 2):
+for r,c in product(range(24), repeat = 2):
     for a in legal_actions_cache[(r,c)]:
         tp[(r,c)][a] = {}
         for n in neighbor_cache[(r,c)]:
                 tp[(r,c)][a][n] = 0
 
-for r,c in product(range(args.size), repeat = 2):
+for r,c in product(range(24), repeat = 2):
     if (r,c) in corner_sqrs:
         for a in legal_actions_cache[(r,c)]:
             for n in neighbor_cache[(r,c)]:
@@ -194,7 +206,7 @@ for r,c in product(range(args.size), repeat = 2):
                     tp[(r,c)][a][n] = C
                 else:
                     tp[(r,c)][a][n] = 1 - C
-    elif ((r < 0) or (r >= args.size) or (c < 0) or (r >= args.size)):
+    elif ((r < 0) or (r >= 24) or (c < 0) or (r >= 24)):
         for a in legal_actions_cache[(r,c)]:
             for n in neighbor_cache[(r,c)]:
                 if ((a[0] + r, a[1] + c) == n):
@@ -218,7 +230,7 @@ for r,c in product(range(args.size), repeat = 2):
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
 class FlatGridWorld:
     def __init__(self, size, agents, obstacles=[]):
-        self.size = args.size  # grid is size x size
+        self.size = 24  # grid is size x size
         self.n_squares = size * size
         self.obstacles = [Obs1, Obs2, Obs3]
         self.agents = agents
@@ -231,15 +243,15 @@ class FlatGridWorld:
         grid = np.zeros((self.size, self.size))
 
         # Fill in obstacle, agent, start, goal
-        for coord in product(range(args.size), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
+        for coord in product(range(24), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
             if coord in totObs:
                 grid[coord] = -1
 
-        for coord in product(range(args.size), repeat = 2):
+        for coord in product(range(24), repeat = 2):
             if coord in end_goal:
                 grid[coord] = 0.8
 
-        for i in route_1:
+        for i in routes["2"]["Route"]:
             grid[i] = 0.2
 
         for i in range(n_agents):
@@ -250,27 +262,16 @@ class FlatGridWorld:
         bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
-        arc = Arc(
-            xy=(args.size//2 - 0.5, args.size//2 - 0.5),             # center of the full ellipse
-            width=args.size//4, height=args.size//4,     # diameter of the arc (radius*2)
-            angle=270,               # rotation of the arc
-            theta1=0, theta2=90,   # start and end angles in degrees
-            color='white',
-            linestyle=(0, (10, 5)),
-            linewidth=2
-        )
-
         plt.imshow(grid.T, cmap=cmap, norm=norm)
         plt.xticks([])
         plt.yticks([])
-        plt.axhline(xmin = 0.50, y = args.size*5//8 - 0.5 if (args.size//12)%2 == 0 else args.size*5//8, color = 'yellow', linestyle='--') #((L/4)%2)*0.5)
-        plt.axvline(ymin = 0.75, x= args.size*3//8 - 0.5 if (args.size//12)%2 == 0 else args.size//3, color='yellow', linestyle='--')
-        plt.axvline(ymax = 0.5, x = args.size*3//8 - 0.5 if (args.size//12)%2 == 0 else args.size//3, color='yellow', linestyle='--')
+        plt.axhline(xmin = 0.65, y = 11.5, color = 'yellow', linestyle='--')
+        plt.axhline(xmax = 0.35, y = 11.5, color = 'yellow', linestyle='--')
+        plt.axvline(ymin = 0.65, x= 11.5, color='yellow', linestyle='--')
+        plt.axvline(ymax = 0.35, x = 11.5, color='yellow', linestyle='--')
 
         ax = plt.gca()
         ax.invert_yaxis()
-        ax.add_patch(arc)
-
         plt.grid(True)
 
     #Update world will take in an agent and a new position and update that agents position according to 
@@ -301,9 +302,9 @@ class Agent:
         self.alpha = alpha
         self.beta = beta
 
-        self.qtable = {(r,c): {} for r,c in product(range(args.size), repeat = 2)}
+        self.qtable = {(r,c): {} for r,c in product(range(24), repeat = 2)}
 
-        for r,c in product(range(args.size), repeat = 2):
+        for r,c in product(range(24), repeat = 2):
             for a in legal_actions_cache[(r,c)]:
                 self.qtable[(r,c)][a] = 0
 
@@ -394,7 +395,7 @@ class Agent:
             z_3 = ii / N_max
             z_4 = (ii-1) / N_max
             rho_plus = rho_plus + max(0, X_sort[ii])**self.alpha * (z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g))
-            rho_minus = rho_minus + (-self.lamda * max(0, -X_sort[ii])**self.beta) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
+            rho_minus = rho_minus + (self.lamda * max(0, -X_sort[ii])**self.beta) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
         rho = rho_plus - rho_minus
 
         return rho
