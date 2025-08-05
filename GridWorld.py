@@ -50,17 +50,19 @@ totObs.extend(Obs4)
 #Environment Definitions
 n_agents = 1
 num_episodes = args.episodes
-all_sqrs = [(r,c) for r in range(24) for c in range(24)]
-corner_sqrs = [(0,0),(0,23), (23, 0), (23, 23)]
-action_set = [(1,0),(0,1),(-1,0),(0,-1)]
+
+all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
+corner_sqrs = [(0,0),(0,args.size), (args.size, 0), (args.size, args.size)]
+action_set = [(1,0,-1),(1,0,0),(1,0,1),(0,1,-1),(0,1,0),(0,1,1),(-1,0,-1),(-1,0,0),(-1,0,1),(0,-1,-1),(0,-1,0),(0,-1,1),(0,0,-1),(0,0,0),(0,0,1)]
+speed_set = [0,1,2]
+dir_set = [1,2,3,4] # 1:right, 2:up, 3:left, 4:down
+
 n_actions = len(action_set)
-n_states = len(all_sqrs)
+n_states = len(all_sqrs) * len(speed_set) * len(dir_set)
 
 
 #Constants
 C = 0.95
-
-finish_n = 0
 
 lr = 0.2
 discount = 0.9
@@ -68,12 +70,15 @@ max_epsilon = 1.0
 min_epsilon = 0.01
 target_epsilon = 0.011
 
-decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / args.episodes
+decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / num_episodes
+
 
 #Global Variables
 t = 0
 t_e = 0
 epsilon = 1
+finish_n = 0
+
 
 def main():
     global epsilon
@@ -124,22 +129,28 @@ def main():
 
 
 def Goal(state):
-    if state in end_goal:
+    if (state[0],state[1]) in end_goal:
         return 1
     else: 
         return 0
 def Obs(state):
-    if state in totObs:
+    if (state[0],state[1]) in totObs:
         return 1
     else:
         return 0
 
-#Returns available squares which an agent may legally move to for any given agent. 
+#Returns available squares (not states) which an agent may legally move to for any given agent. 
 def neighboringSqrs(state):
-    valid = [(state[0] + 1, state[1]), 
+    valid = []
+    valid.append((state[0] + 1, state[1]), 
     (state[0] - 1, state[1]), 
     (state[0], state[1] + 1),
-    (state[0], state[1] - 1)]
+    (state[0], state[1] - 1))
+    if state[2] == 2:
+        valid.append((state[0] + 2, state[1]), 
+        (state[0] - 2, state[1]), 
+        (state[0], state[1] + 2),
+        (state[0], state[1] - 2))
     
     valid = [i for i in valid if 0 <= i[0] < 24 and 0 <= i[1] < 24]
 
@@ -150,16 +161,118 @@ neighbor_cache = {
 }
 
 def getLegalActions(state):
+        speed = state[2]
+        dir = state[3]
         legal_actions = []
-        for i in neighboringSqrs(state):
-            if i[0] > state[0]:
-                legal_actions.append((1,0))
-            if i[0] < state[0]:
-                legal_actions.append((-1,0))
-            if i[1] > state[1]:
-                legal_actions.append((0,1))
-            if i[1] < state[1]:
-                legal_actions.append((0,-1))
+        if dir == 1:
+            if speed == 0:
+                for acc in range(0,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+                        legal_actions.append((0,0,acc))
+            elif speed == 1:
+                for acc in range(-1,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+            elif speed == 2:
+                for acc in range(-1,1):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+        elif dir == 2:
+            if speed == 0:
+                for acc in range(0,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+                        legal_actions.append((0,0,acc))
+            elif speed == 1:
+                for acc in range(-1,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+            elif speed == 2:
+                for acc in range(-1,1):
+                    for i in neighboringSqrs(state):
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+        elif dir == 3:
+            if speed == 0:
+                for acc in range(0,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+                        legal_actions.append((0,0,acc))
+
+            elif speed == 1:
+                for acc in range(-1,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+            elif speed == 2:
+                for acc in range(-1,1):
+                    for i in neighboringSqrs(state):
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+        elif dir == 4:
+            if speed == 0:
+                for acc in range(0,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] > state[1]:
+                            legal_actions.append((0,1,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+                        legal_actions.append((0,0,acc))
+            elif speed == 1:
+                for acc in range(-1,2):
+                    for i in neighboringSqrs(state):
+                        if i[0] > state[0]:
+                            legal_actions.append((1,0,acc))
+                        if i[0] < state[0]:
+                            legal_actions.append((-1,0,acc))
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))
+            elif speed == 2:
+                for acc in range(-1,1):
+                    for i in neighboringSqrs(state):
+                        if i[1] < state[1]:
+                            legal_actions.append((0,-1,acc))    
 
         if Goal(state) == 1:
             legal_actions = [0]
@@ -168,17 +281,15 @@ def getLegalActions(state):
             return legal_actions
 
 legal_actions_cache = {
-    (r, c): getLegalActions((r, c)) for r, c in product(range(24), repeat=2)
+    (r, c, s, d): getLegalActions((r, c, s, d)) for r, c in product(range(args.size), repeat=2) for s in speed_set for d in dir_set
 }
-    
-def Dist(state):
-    dist = min(math.sqrt((i[1] - state[1])**2 + (i[0] - state[0])**2) for i in end_goal)
-    return dist
+
 
 def onRoute(state, route):
-    if state in route["Route"]:
+
+    if (state[0], state[1]) in route["Route"]:
         return (route["Route"].index(state)/24)
-    elif state in route["Lane"]:
+    elif (state[0], state[1]) in route["Lane"]:
         return 0
     else:
         return -0.7
@@ -187,7 +298,6 @@ def rewardFunction(state):
     const1 = 1000
     const2 = 100
     const4 = 10
-    
     return(const1 * Goal(state) - const2 * Obs(state) + const4 * onRoute(state, routes['2']))
 
 tp = {(r,c): {} for r,c in product(range(24), repeat = 2)}
@@ -277,12 +387,11 @@ class FlatGridWorld:
     #Update world will take in an agent and a new position and update that agents position according to 
     #grid spaces where the agent is allowed to move to. 
     def updateWorld(self, agent, chosen_action):
-        if chosen_action in legal_actions_cache[agent.agent_pos]:
+        if chosen_action in legal_actions_cache[agent.agent_pos[0],agent.agent_pos[1], agent.agent_speed, agent.agent_dir]:
             taken_action = random.choices(list(tp[agent.agent_pos][chosen_action].keys()), weights=list(tp[agent.agent_pos][chosen_action].values()), k=1)[0]
             agent.agent_pos = taken_action
 
         global t
-        #print(t)
         t += 1
 
 
@@ -363,9 +472,9 @@ class Agent:
 
         next_states = list(tp[self.agent_pos][action].keys())
         probs = list((tp[self.agent_pos][action]).values())
+
         for _ in range(n_samples):
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
-            #reward = self.getReward(self.agent_pos, action)
             reward = rewardFunction(s_prime)
             v_s_prime = max(self.qtable[s_prime].values(), default = 0.0)
 
@@ -399,18 +508,7 @@ class Agent:
         rho = rho_plus - rho_minus
 
         return rho
-    
-    # potentially unecessary
-    def getReward(self, state, action):
-        if action not in tp[state]:
-            # action doesn't work with state (invalid state/action pair)
-            print(f"Warning: action {action} not in tp[{state}]")
-            return 0
-        tot_reward = 0
-        for next_state, prob in tp[state][action].items(): # note: items() returns dict key-value pairs as tuples
-            tot_reward += prob * rewardFunction(next_state)
-        
-        return tot_reward  
+      
     
     """
     def value_function(self, reward):
@@ -451,16 +549,3 @@ Main function starts here
 
 main()
 
-
-"""
-Learning Flow
-
-getAction() -> In terms of exploit/explore and transition probability. 
-
-getReward() -> In terms of current state, action, and transition probability. 
-
-updateQ() -> In terms of current state, action, future states and distorted transition probability. 
-
-updateWorld() -> Update agent states and visualization. 
-
-"""
