@@ -10,7 +10,7 @@ import pprint
 import math
 from tqdm import tqdm
 
-#The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
+#The parse arguments allow for arguments to be passed to the program via the command line. 
 parser = argparse.ArgumentParser()
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
 args = parser.parse_args()
@@ -49,10 +49,12 @@ totObs.extend(Obs4)
 
 #Environment Definitions
 n_agents = 1
+SIZE = 24
 num_episodes = args.episodes
 
-all_sqrs = [(r,c) for r in range(24) for c in range(24)]
-corner_sqrs = [(0,0),(0,24), (24, 0), (24, 24)]
+all_sqrs = [(r,c) for r in range(SIZE) for c in range(SIZE)]
+corner_sqrs = [(0,0),(0,SIZE), (SIZE, 0), (SIZE, SIZE)]
+
 action_set = [(1,0,-1),(1,0,0),(1,0,1),(0,1,-1),(0,1,0),(0,1,1),(-1,0,-1),(-1,0,0),(-1,0,1),(0,-1,-1),(0,-1,0),(0,-1,1),(0,0,-1),(0,0,0),(0,0,1)]
 speed_set = [0,1,2]
 dir_set = [1,2,3,4] # 1:right, 2:up, 3:left, 4:down
@@ -85,9 +87,12 @@ def main():
     global t_e
     global t
     global finish_n
+    
+    
+    
+    agents = [Agent(agent_n = 1, start_state = (13, 0, 1, 2), state = (0, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
+    env = FlatGridWorld(size=SIZE, agents=agents, obstacles=(Obs1,Obs2,Obs3))
 
-    agents = [Agent(agent_n = 1, start = (13, 0), agent_pos = (0,0), agent_speed = 1, agent_dir = 2, phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
-    env = FlatGridWorld(size=24, agents=agents, obstacles=(Obs1,Obs2,Obs3))
     
     for i in tqdm(range(num_episodes)):
         agents[0].reset()
@@ -109,12 +114,12 @@ def main():
                 t = 0
                 break
 
-            if agents[0].agent_pos in end_goal:
+            if (agents[0].state[0], agents[0].state[1]) in end_goal:
                 t = 0
                 finish_n += 1
                 break
             
-            if agents[0].agent_pos in totObs:
+            if (agents[0].state[0], agents[0].state[1]) in totObs:
                 t = 0
                 break
 
@@ -190,13 +195,13 @@ def neighboringStates(state):
             if state[3] == 4:
                 valid.extend((state[0], state[1] - 2, s, 4))
     
-    valid = [i for i in valid if 0 <= i[0] < 24 and 0 <= i[1] < 24]
+    valid = [i for i in valid if 0 <= i[0] < SIZE and 0 <= i[1] < SIZE]
 
     return valid
 
 
 neighbor_cache = {
-    (r, c, s, d): neighboringStates((r,c,s,d)) for r, c in product(range(24), repeat=2) for s in speed_set for d in dir_set
+    (r, c, s, d): neighboringStates((r,c,s,d)) for r, c in product(range(SIZE), repeat=2) for s in speed_set for d in dir_set
 }
 
 def getLegalActions(state):
@@ -269,7 +274,6 @@ def getLegalActions(state):
                             legal_actions.append((0,1,acc))
                         if i[1] < state[1]:
                             legal_actions.append((0,-1,acc))
-                        legal_actions.append((0,0,acc))
 
             elif speed == 1:
                 for acc in range(-1,2):
@@ -320,7 +324,7 @@ def getLegalActions(state):
             return legal_actions
 
 legal_actions_cache = {
-    (r, c, s, d): getLegalActions((r, c, s, d)) for r, c in product(range(24), repeat=2) for s in speed_set for d in dir_set
+    (r, c, s, d): getLegalActions((r, c, s, d)) for r, c in product(range(SIZE), repeat=2) for s in speed_set for d in dir_set
 }
 
 def actionDir(action):
@@ -336,19 +340,23 @@ def actionDir(action):
 def onRoute(state, route):
 
     if (state[0], state[1]) in route["Route"]:
-        return (route["Route"].index(state)/24)
+        return (route["Route"].index(state)/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
         return 0
     else:
         return -0.7
 
-def rewardFunction(state):
-    const1 = 1000
-    const2 = 100
-    const4 = 10
-    return(const1 * Goal(state) - const2 * Obs(state) + const4 * onRoute(state, routes['2']))
 
-tp = {(r,c,s,d)[a]: {} for r,c in product(range(24), repeat = 2) for s in speed_set for d in dir_set for a in legal_actions_cache(r, c, s, d)}
+#Still need to add reward for stop sign stoppage and collision avoidance
+def rewardFunction(state, action):
+    const1 = 1000   # Reward for reaching the goal
+    const2 = 100    # Penalty for hitting an obstacle
+    const3 = 10     # Reward for being on the route
+    const4 = 1      # Penalty for accelerating or decelerating
+    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]))
+  
+
+tp = {(r,c,s,d)[a]: {} for r,c in product(range(SIZE), repeat = 2) for s in speed_set for d in dir_set for a in legal_actions_cache(r, c, s, d)}
 
 for r,c,s,d,a,n in gen:
     tp[(r,c,s,d)][a][n] = 0
@@ -388,12 +396,11 @@ for r,c,s,d,a,n in gen:
                 tp[(r,c,s,d)][a][n] = 0.15
 
 
-
 #This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
 class FlatGridWorld:
     def __init__(self, size, agents, obstacles=[]):
-        self.size = 24  # grid is size x size
+        self.size = SIZE  # grid is size x size
         self.n_squares = size * size
         self.obstacles = [Obs1, Obs2, Obs3]
         self.agents = agents
@@ -406,11 +413,11 @@ class FlatGridWorld:
         grid = np.zeros((self.size, self.size))
 
         # Fill in obstacle, agent, start, goal
-        for coord in product(range(24), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
+        for coord in product(range(SIZE), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
             if coord in totObs:
                 grid[coord] = -1
 
-        for coord in product(range(24), repeat = 2):
+        for coord in product(range(SIZE), repeat = 2):
             if coord in end_goal:
                 grid[coord] = 0.8
 
@@ -418,7 +425,7 @@ class FlatGridWorld:
             grid[i] = 0.2
 
         for i in range(n_agents):
-            grid[self.agents[i].agent_pos] = 1.0
+            grid[(self.agents[i].state[0], self.agents[i].state[1])] = 1.0
 
 
         cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
@@ -440,10 +447,9 @@ class FlatGridWorld:
     #Update world will take in an agent and a new position and update that agents position according to 
     #grid spaces where the agent is allowed to move to. 
     def updateWorld(self, agent, chosen_action):
-        if chosen_action in legal_actions_cache[agent.agent_pos[0],agent.agent_pos[1], agent.agent_speed, agent.agent_dir]:
-            taken_action = random.choices(list(tp[agent.agent_pos][chosen_action].keys()), weights=list(tp[agent.agent_pos][chosen_action].values()), k=1)[0]
-            agent.agent_pos = taken_action
-
+        if chosen_action in legal_actions_cache[agent.state]:
+            next_state = random.choices(list(tp[agent.state][chosen_action].keys()), weights=list(tp[agent.state][chosen_action].values()), k=1)[0]
+            agent.state = next_state
         global t
         t += 1
 
@@ -451,12 +457,10 @@ class FlatGridWorld:
 #The agent class holds the relevant information for each agent including starting location as a coordinate, 
 #the number of the agent, the position, the speed, and the hyperparameter. 
 class Agent:
-    def __init__(self, agent_n, start, agent_pos, agent_speed, agent_dir, phi, lamda, gamma_gain, gamma_loss, alpha, beta):
+    def __init__(self, agent_n, start, state, phi, lamda, gamma_gain, gamma_loss, alpha, beta):
         self.agent_n = agent_n
         self.start = start
-        self.agent_pos = agent_pos
-        self.agent_speed = agent_speed
-        self.agent_dir = agent_dir
+        self.state = state
         self.phi = phi
         self.lamda = lamda
         self.gamma_gain = gamma_gain
@@ -464,7 +468,8 @@ class Agent:
         self.alpha = alpha
         self.beta = beta
 
-        self.qtable = {(r,c,s,d): {} for r,c in product(range(24), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
+
+        self.qtable = {(r,c,s,d): {} for r,c in product(range(SIZE), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
 
         for r,c in product(range(24), repeat = 2):
             for s in (0,1,2):
@@ -476,32 +481,31 @@ class Agent:
 
     #Reset is called at the end of the initializing function to ensure the agents are at the right starting points
     def reset(self):
-        self.agent_pos = self.start
-        return self.agent_pos
+        self.state = self.start
+        return self.state
             
-    def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
+    def getQValue(self, action):
         """
             Returns Q(state, action)
             Note: need to make sure it returns zero if state is new
         """
-        return self.qtable[self.agent_pos][action]
+        return self.qtable[self.state][action]
     
     def getAction(self, epsilon):
         """
             Choose an action for a given state using the exploration rate
             When exploiting, use computeActionFromQValues
         """
-        
         action = None
 
         #If at terminal state no legal actions can be taken
-        if legal_actions_cache[self.agent_pos] == [0]:
+        if legal_actions_cache[self.state] == [0]:
             return None
         
         #Choose explore or exploit based on exploration rate epsilon
         explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
         if explore == True:
-            action = random.choice(legal_actions_cache[self.agent_pos])
+            action = random.choice(legal_actions_cache[self.state])
         else:
             action = self.getPolicy()
 
@@ -515,7 +519,7 @@ class Agent:
         target = self.rho_cpt(samples)
         current_q = self.getQValue(action)
         new_q = ((1 - lr) * current_q) + (lr * target)
-        self.qtable[self.agent_pos][action] = new_q 
+        self.qtable[self.state][action] = new_q 
 
     def sample_outcomes(self, action, n_samples=50):
         """
@@ -524,13 +528,12 @@ class Agent:
             in the updateQ function
         """
         samples = []
-
-        next_states = list(tp[self.agent_pos][action].keys())
-        probs = list((tp[self.agent_pos][action]).values())
+        next_states = list(tp[self.state][action].keys())
+        probs = list((tp[self.state][action]).values())
 
         for _ in range(n_samples):
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
-            reward = rewardFunction(s_prime)
+            reward = rewardFunction(s_prime, action)
             v_s_prime = max(self.qtable[s_prime].values(), default = 0.0)
 
             full_return = reward + (discount * v_s_prime) #+ random.gauss(0,1)
@@ -543,7 +546,6 @@ class Agent:
             Compute CPT-value of a discrete random variable X given samples
             'samples' is a list of outcomes (comprised of rewards + discounted future values)
         """ 
-
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
         N_max = len(X_sort)
@@ -588,7 +590,7 @@ class Agent:
         best_value = -float('inf')
         best_actions = []
 
-        for action in legal_actions_cache[self.agent_pos]:
+        for action in legal_actions_cache[self.state]:
             value = self.getQValue(action)
             if value > best_value:
                 best_value = value
