@@ -132,7 +132,6 @@ def main():
     with open("qtable_output.txt", "w") as f:
         pprint.pprint(agents[0].qtable, stream=f)
 
-
 def Goal(state):
     if (state[0],state[1]) in end_goal:
         return 1
@@ -257,15 +256,15 @@ def getLegalActions(state):
     return legal_actions    
 
 
+
 legal_actions_cache = {
     (r, c, s, d): getLegalActions((r, c, s, d)) for r in range(SIZE) for c in range(SIZE) for s in speed_set for d in dir_set
 }
-    
 
 def onRoute(state, route):
 
     if (state[0], state[1]) in route["Route"]:
-        return (route["Route"].index(state)/SIZE)
+        return (route["Route"].index((state[0],state[1]))/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
         return 0
     else:
@@ -287,9 +286,10 @@ tp = {(r,c,s,d): {a: {} for a in legal_actions_cache[(r, c, s, d)]}
     for s in speed_set
     for d in dir_set}
 
-gen = (
+gen = list(
     (r, c, s, d, a, n)
-    for r, c in product(range(24), repeat=2)
+    for r in range(SIZE)
+    for c in range(SIZE)
     for s in speed_set
     for d in dir_set
     for a in legal_actions_cache[(r, c, s, d)]
@@ -297,14 +297,11 @@ gen = (
 )
 
 for r,c,s,d,a,n in gen:
-    tp[(r,c,s,d)][a][n] = 0
-
-for r,c,s,d,a,n in gen:
     if ((r,c) in end_goal):
         tp[(r,c,s,d)][a][n] = 0 
     
     elif (s == 0):
-        if ((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3])):
+        if ((r, c) == (n[0],n[1])) and (a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3]):
             tp[(r,c,s,d)][a][n] = 1
         else:
             tp[(r,c,s,d)][a][n] = 0
@@ -329,10 +326,10 @@ for r,c,s,d,a,n in gen:
                 tp[(r,c,s,d)][a][n] = 0.05
         elif not (a[2] == 0):
             if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3])):
+
                 tp[(r,c,s,d)][a][n] = 0.85
             else:
                 tp[(r,c,s,d)][a][n] = 0.15
-
 
 #This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
@@ -443,6 +440,12 @@ class Agent:
         #Choose explore or exploit based on exploration rate epsilon
         explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
         if explore == True:
+            #if not (legal_actions_cache[self.state]):
+                #print(self.state)
+                #print(neighbor_cache[self.state])
+                #print(legal_actions_cache[self.state])
+            #else:
+                #print("success")
             action = random.choice(legal_actions_cache[self.state])
         else:
             action = self.getPolicy()
