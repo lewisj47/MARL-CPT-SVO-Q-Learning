@@ -90,7 +90,7 @@ def main():
     
     
     
-    agents = [Agent(agent_n = 1, start_state = (13, 0, 1, 2), state = (0, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
+    agents = [Agent(agent_n = 1, start = (13, 0, 1, 2), state = (0, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
     env = FlatGridWorld(size=SIZE, agents=agents, obstacles=(Obs1,Obs2,Obs3))
 
     
@@ -132,15 +132,6 @@ def main():
     with open("qtable_output.txt", "w") as f:
         pprint.pprint(agents[0].qtable, stream=f)
 
-gen = (
-    (r, c, s, d, a, n)
-    for r, c in product(range(24), repeat=2)
-    for s in speed_set
-    for d in dir_set
-    for a in legal_actions_cache[(r, c, s, d)]
-    for n in neighbor_cache[(r, c, s, d)]
-)
-
 def Goal(state):
     if (state[0],state[1]) in end_goal:
         return 1
@@ -157,11 +148,8 @@ def neighboringStates(state):
     valid = []
     if (state[2] == 0):
         for s in (0,1):
-            for dir in dir_set:
-                valid.extend([(state[0] + 1, state[1], s, d), 
-                (state[0] - 1, state[1], s, d), 
-                (state[0], state[1] + 1, s, d),
-                (state[0], state[1] - 1, s, d)])
+            for d in dir_set:
+                valid.extend([(state[0], state[1], s, d)])
     if (state[2] == 1):
         for s in (0,1,2):
             if state[3] == 1:
@@ -187,13 +175,13 @@ def neighboringStates(state):
     if state[2] == 2:
         for s in (1,2):
             if state[3] == 1:
-                valid.extend((state[0] + 2, state[1], s, 1))
+                valid.extend([(state[0] + 2, state[1], s, 1)])
             if state[3] == 2:
-                valid.extend((state[0], state[1] + 2, s, 2))
+                valid.extend([(state[0], state[1] + 2, s, 2)])
             if state[3] == 3:
-                valid.extend((state[0] - 2, state[1], s, 3))
+                valid.extend([(state[0] - 2, state[1], s, 3)])
             if state[3] == 4:
-                valid.extend((state[0], state[1] - 2, s, 4))
+                valid.extend([(state[0], state[1] - 2, s, 4)])
     
     valid = [i for i in valid if 0 <= i[0] < SIZE and 0 <= i[1] < SIZE]
 
@@ -208,10 +196,9 @@ def getLegalActions(state):
         speed = state[2]
         dir = state[3]
         legal_actions = []
-        if dir == 1:
-            if speed == 0:
-                for acc in range(0,2):
-                    for i in neighboringStates(state):
+        if speed == 0:
+                for acc in (0,1):
+                    for i in neighbor_cache[state]:
                         if i[0] > state[0]:
                             legal_actions.append((1,0,acc))
                         if i[0] < state[0]:
@@ -220,10 +207,10 @@ def getLegalActions(state):
                             legal_actions.append((0,1,acc))
                         if i[1] < state[1]:
                             legal_actions.append((0,-1,acc))
-                        legal_actions.append((0,0,acc))
-            elif speed == 1:
-                for acc in range(-1,2):
-                    for i in neighboringStates(state):
+        if dir == 1:
+            if speed == 1:
+                for acc in (-1,0,1):
+                    for i in neighbor_cache[state]:
                         if i[0] > state[0]:
                             legal_actions.append((1,0,acc))
                         if i[1] > state[1]:
@@ -231,26 +218,14 @@ def getLegalActions(state):
                         if i[1] < state[1]:
                             legal_actions.append((0,-1,acc))
             elif speed == 2:
-                for acc in range(-1,1):
-                    for i in neighboringStates(state):
+                for acc in (-1,0):
+                    for i in neighbor_cache[state]:
                         if i[0] > state[0]:
                             legal_actions.append((1,0,acc))
         elif dir == 2:
-            if speed == 0:
-                for acc in range(0,2):
-                    for i in neighboringStates(state):
-                        if i[0] > state[0]:
-                            legal_actions.append((1,0,acc))
-                        if i[0] < state[0]:
-                            legal_actions.append((-1,0,acc))
-                        if i[1] > state[1]:
-                            legal_actions.append((0,1,acc))
-                        if i[1] < state[1]:
-                            legal_actions.append((0,-1,acc))
-                        legal_actions.append((0,0,acc))
-            elif speed == 1:
-                for acc in range(-1,2):
-                    for i in neighboringStates(state):
+            if speed == 1:
+                for acc in (-1,0,1):
+                    for i in neighbor_cache[state]:
                         if i[0] > state[0]:
                             legal_actions.append((1,0,acc))
                         if i[0] < state[0]:
@@ -258,26 +233,14 @@ def getLegalActions(state):
                         if i[1] > state[1]:
                             legal_actions.append((0,1,acc))
             elif speed == 2:
-                for acc in range(-1,1):
-                    for i in neighboringStates(state):
+                for acc in (-1,0):
+                    for i in neighbor_cache[state]:
                         if i[1] > state[1]:
                             legal_actions.append((0,1,acc))
         elif dir == 3:
-            if speed == 0:
-                for acc in range(0,2):
-                    for i in neighboringStates(state):
-                        if i[0] > state[0]:
-                            legal_actions.append((1,0,acc))
-                        if i[0] < state[0]:
-                            legal_actions.append((-1,0,acc))
-                        if i[1] > state[1]:
-                            legal_actions.append((0,1,acc))
-                        if i[1] < state[1]:
-                            legal_actions.append((0,-1,acc))
-
-            elif speed == 1:
-                for acc in range(-1,2):
-                    for i in neighboringStates(state):
+            if speed == 1:
+                for acc in (-1,0,1):
+                    for i in neighbor_cache[state]:
                         if i[0] < state[0]:
                             legal_actions.append((-1,0,acc))
                         if i[1] > state[1]:
@@ -285,26 +248,14 @@ def getLegalActions(state):
                         if i[1] < state[1]:
                             legal_actions.append((0,-1,acc))
             elif speed == 2:
-                for acc in range(-1,1):
-                    for i in neighboringStates(state):
+                for acc in (-1,0):
+                    for i in neighbor_cache[state]:
                         if i[1] > state[1]:
                             legal_actions.append((0,1,acc))
         elif dir == 4:
-            if speed == 0:
-                for acc in range(0,2):
-                    for i in neighboringStates(state):
-                        if i[0] > state[0]:
-                            legal_actions.append((1,0,acc))
-                        if i[0] < state[0]:
-                            legal_actions.append((-1,0,acc))
-                        if i[1] > state[1]:
-                            legal_actions.append((0,1,acc))
-                        if i[1] < state[1]:
-                            legal_actions.append((0,-1,acc))
-                        legal_actions.append((0,0,acc))
-            elif speed == 1:
-                for acc in range(-1,2):
-                    for i in neighboringStates(state):
+            if speed == 1:
+                for acc in (-1,0,1):
+                    for i in neighbor_cache[state]:
                         if i[0] > state[0]:
                             legal_actions.append((1,0,acc))
                         if i[0] < state[0]:
@@ -312,8 +263,8 @@ def getLegalActions(state):
                         if i[1] < state[1]:
                             legal_actions.append((0,-1,acc))
             elif speed == 2:
-                for acc in range(-1,1):
-                    for i in neighboringStates(state):
+                for acc in (-1,0):
+                    for i in neighbor_cache[state]:
                         if i[1] < state[1]:
                             legal_actions.append((0,-1,acc))    
 
@@ -327,20 +278,30 @@ legal_actions_cache = {
     (r, c, s, d): getLegalActions((r, c, s, d)) for r, c in product(range(SIZE), repeat=2) for s in speed_set for d in dir_set
 }
 
+gen = list(
+    (r, c, s, d, a, n)
+    for r in range(SIZE)
+    for c in range(SIZE)
+    for s in speed_set
+    for d in dir_set
+    for a in legal_actions_cache[(r, c, s, d)]
+    for n in neighbor_cache[(r, c, s, d)]
+)
+
 def actionDir(action):
     if action[0] >= 1:
         return 1
-    if action[1] >= 1:
+    elif action[1] >= 1:
         return 2
-    if action[0] <= 1:
+    elif action[0] <= 1:
         return 3
-    if action[1] <= 1:
+    elif action[1] <= 1:
         return 4
 
 def onRoute(state, route):
 
     if (state[0], state[1]) in route["Route"]:
-        return (route["Route"].index(state)/SIZE)
+        return (route["Route"].index((state[0],state[1]))/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
         return 0
     else:
@@ -356,45 +317,45 @@ def rewardFunction(state, action):
     return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]))
   
 
-tp = {(r,c,s,d)[a]: {} for r,c in product(range(SIZE), repeat = 2) for s in speed_set for d in dir_set for a in legal_actions_cache(r, c, s, d)}
-
-for r,c,s,d,a,n in gen:
-    tp[(r,c,s,d)][a][n] = 0
+tp = {(r,c,s,d): {a: {} for a in legal_actions_cache[(r, c, s, d)]} 
+    for r in range(SIZE) 
+    for c in range(SIZE) 
+    for s in speed_set 
+    for d in dir_set}
 
 for r,c,s,d,a,n in gen:
     if ((r,c) in end_goal):
         tp[(r,c,s,d)][a][n] = 0 
     
     elif (s == 0):
-        if ((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a == n[2]) and (actionDir((a[0],a[1])) == n[3])):
+        if ((r, c) == (n[0],n[1])) and (a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3]):
             tp[(r,c,s,d)][a][n] = 1
         else:
             tp[(r,c,s,d)][a][n] = 0
 
     elif (d == n[3]):
         if (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a == n[2]) and (actionDir((a[0],a[1])) == n[3])):
+            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3])):
                 tp[(r,c,s,d)][a][n] = 0.99
             else:
                 tp[(r,c,s,d)][a][n] = 0.01
         elif not (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a == n[2]) and (actionDir((a[0],a[1])) == n[3])):
+            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3])):
                 tp[(r,c,s,d)][a][n] = 0.95
             else:
                 tp[(r,c,s,d)][a][n] = 0.05
                 
     elif not (d == n[3]):
         if (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a == n[2]) and (actionDir((a[0],a[1])) == n[3])):
+            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3])):
                 tp[(r,c,s,d)][a][n] = 0.95
             else:
                 tp[(r,c,s,d)][a][n] = 0.05
         elif not (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a == n[2]) and (actionDir((a[0],a[1])) == n[3])):
+            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3])):
                 tp[(r,c,s,d)][a][n] = 0.85
             else:
                 tp[(r,c,s,d)][a][n] = 0.15
-
 
 #This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
@@ -505,6 +466,12 @@ class Agent:
         #Choose explore or exploit based on exploration rate epsilon
         explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
         if explore == True:
+            #if not (legal_actions_cache[self.state]):
+                #print(self.state)
+                #print(neighbor_cache[self.state])
+                #print(legal_actions_cache[self.state])
+            #else:
+                #print("success")
             action = random.choice(legal_actions_cache[self.state])
         else:
             action = self.getPolicy()
