@@ -18,8 +18,10 @@ args = parser.parse_args()
 end_goal = []
 #End goal at the top
 #end_goal.extend([(r, c) for c in range(23, 24) for r in range(9, 15)])
+
 #End goal on the right
 end_goal.extend([(r, c) for c in range(9,12) for r in range(22, 24)])
+
 
 #Routes are used in the reward function to reward the agent for making progress towards the goal
 routes = {}
@@ -33,6 +35,7 @@ route_2 = [(13,r) for r in range (0, 10)]
 lane_2 = [(r,c) for r in range(12,15) for c in range(0,12)]
 route_2.extend([(r,10) for r in range(13,22)])
 lane_2.extend([(r,c) for r in range(13,22) for c in range(9,12)])
+
 
 #Populating route dictionary
 routes["1"] = {"Route": route_1, "Lane": lane_1}
@@ -72,6 +75,7 @@ corner_sqrs = [(0,0),(0,SIZE), (SIZE, 0), (SIZE, SIZE)]
 #All available actions to the agent
 action_set = [(1,0,-1),(1,0,0),(1,0,1),(0,1,-1),(0,1,0),(0,1,1),(-1,0,-1),(-1,0,0),(-1,0,1),(0,-1,-1),(0,-1,0),(0,-1,1)]
 #All speeds the agent can be driving at
+
 speed_set = [0,1,2]
 #All directions the agent can be driving in
 dir_set = [1,2,3,4] # 1:right, 2:up, 3:left, 4:down
@@ -88,7 +92,6 @@ discount = 0.9
 max_epsilon = 1.0
 min_epsilon = 0.01
 target_epsilon = 0.011
-
 decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / num_episodes
 
 #T used to measure the number of ticks in a single episode
@@ -103,6 +106,7 @@ def main():
     #Number of episodes where the agent makes it to the finish line
     finish_n = 0
     
+    
     #List containing all agent objects
     agents = [Agent(agent_n = 1, start = (13, 0, 1, 2), state = (13, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
     #Environment object that is updated and rendered
@@ -113,6 +117,7 @@ def main():
 
     for i in tqdm(range(num_episodes)):
         agents[0].reset()                               #Reset agent states
+
         while True:
             action = agents[0].getAction(epsilon)       #Get an action for agent i
 
@@ -131,17 +136,12 @@ def main():
             plt.pause(0.0001)                           #Pause between episodes in seconds
            
 
-            if ((agents[0].state[0], agents[0].state[1]) in end_goal): #End episode if agent has reached the goal
-                t = 0
-                finish_n += 1
-                break
-            
-            if (agents[0].state[0], agents[0].state[1]) in totObs:   # End episode if agent collides with an obstacle
-                t = 0
-                break
+            x, y, s, d = agents[0].state
 
-            if not neighbor_cache[(agents[0].state[0], agents[0].state[1], agents[0].state[2], agents[0].state[3])]: #End episode if agent has no valid next-states
+            if (x, y) in end_goal or (x, y) in totObs or not neighbor_cache.get((x, y, s, d), False):
                 t = 0
+                if (x, y) in end_goal:
+                    finish_n += 1
                 break
 
         rewardGraph.append(totReward) #Extend list of cumulative rewards per episode
@@ -232,7 +232,7 @@ def neighboringStates(state):
 
 #neighbor_cache is used so the neighboringStates function doesnt need to be called every time
 neighbor_cache = {
-    (r, c, s, d): neighboringStates((r,c,s,d)) for r in range(SIZE) for c in range(SIZE) for s in speed_set for d in dir_set
+    (c, r, s, d): neighboringStates((c,r,s,d)) for c in range(SIZE) for r in range(SIZE) for s in speed_set for d in dir_set
 }
 
 """
@@ -270,14 +270,14 @@ This function takes a state as a tuple and returns a list of tuples which repres
 and acceleration. 
 """
 def getLegalActions(state):
-    r, c, s, d = state
+    c, r, s, d = state
     possible_actions = [(1,0), (-1,0), (0,1), (0,-1)]
 
     dir_vec = dirToAction(d)
     dir_backwards = (-dir_vec[0], -dir_vec[1])
 
     if Goal(state):
-        return [0]
+        return [(0, 0, 0)]
     
     legal_actions = []
     neighbors = set(neighbor_cache[state])
@@ -285,11 +285,13 @@ def getLegalActions(state):
     if s == 0:
         for acc in (0, 1):
             for dx, dy in possible_actions:
-                new_r = r + dx
-                new_c = c + dy
+                new_c = c + dx
+                new_r = r + dy
                 new_d = actionToDir((dx, dy))
                 new_s = s + acc
-                new_state = (r, c, new_s, new_d)
+
+                new_state = (c, r, new_s, new_d)
+                
                 if new_state in neighbors:
                     legal_actions.append((dx, dy, acc))
     
@@ -298,21 +300,21 @@ def getLegalActions(state):
             for dx, dy in possible_actions:
                 if (dx, dy) == dir_backwards:
                     continue
-                new_r = r + dx
-                new_c = c + dy
+                new_c = c + dx
+                new_r = r + dy
                 new_d = actionToDir((dx, dy))
                 new_s = s + acc
-                new_state = (new_r, new_c, new_s, new_d)
+                new_state = (new_c, new_r, new_s, new_d)
                 if new_state in neighbors:
                     legal_actions.append((dx, dy, acc))
 
     elif s == 2:
         for acc in (-1, 0):
             dx, dy = dir_vec
-            new_r = r + s * dx
-            new_c = c + s * dy
+            new_c = c + s * dx
+            new_r = r + s * dy
             new_s = s + acc
-            new_state = (new_r, new_c, new_s, d)
+            new_state = (new_c, new_r, new_s, d)
             if new_state in neighbors:
                 legal_actions.append((dx, dy, acc))
     #print(legal_actions)
@@ -321,7 +323,7 @@ def getLegalActions(state):
 
 #legal_actions_cache is used so that getLegalActions does not need to be called. 
 legal_actions_cache = {
-    (r, c, s, d): getLegalActions((r, c, s, d)) for r in range(SIZE) for c in range(SIZE) for s in speed_set for d in dir_set
+    (c, r, s, d): getLegalActions((c, r, s, d)) for c in range(SIZE) for r in range(SIZE) for s in speed_set for d in dir_set
 }
 
 """
@@ -337,7 +339,13 @@ def onRoute(state, route):
     if (state[0], state[1]) in route["Route"]:
         return (route["Route"].index((state[0],state[1]))/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
+        return (route["Lane"].index((state[0],state[1]))/(5 * SIZE))
+    else:
         return 0
+
+def notMoving(state, action):
+    if state[2] == 0 and action[2] == 0:
+        return 1
     else:
         return -0.7
 
@@ -351,64 +359,74 @@ hitting an obstacle, and being on the route are important to the reward function
 def rewardFunction(state, action):
     const1 = 1000   # Reward for reaching the goal
     const2 = 100    # Penalty for hitting an obstacle
-    const3 = 10     # Reward for being on the route
-    const4 = 0.5      # Penalty for accelerating or decelerating
-    const5 = 1
-    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const3 * t)
+    const3 = 1000     # Reward for being on the route
+    const4 = 0.5    # Penalty for accelerating or decelerating
+    const5 = 1      # Penalty for not moving
+    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action))
   
 
-#TP stands for transition probability and is a dictionary which holds the probability that an agent will end up at state n
-#given they are in state (r,c,s,d) and take action a. 
-tp = {(r,c,s,d): {a: {} for a in legal_actions_cache[(r, c, s, d)]} 
-    for r in range(SIZE)
+tp = {(c,r,s,d): {a: {} for a in legal_actions_cache[(c, r, s, d)]} 
     for c in range(SIZE)
+    for r in range(SIZE)
     for s in speed_set
     for d in dir_set}
 
-gen = list(
-    (r, c, s, d, a, n)
-    for r in range(SIZE)
+for c, r, s, d, a in [
+    (c, r, s, d, a)
     for c in range(SIZE)
+    for r in range(SIZE)
     for s in speed_set
     for d in dir_set
-    for a in legal_actions_cache[(r, c, s, d)]
-    for n in neighbor_cache[(r, c, s, d)]
-)
-
-for r,c,s,d,a,n in gen:
-    if ((r,c) in end_goal):
-        tp[(r,c,s,d)][a][n] = 0 
+    for a in legal_actions_cache[(c, r, s, d)]
+]:
+    neighbors = neighbor_cache[(c, r, s, d)]
+    probs = {}
     
-    elif (s == 0):
-        if ((r, c) == (n[0],n[1])) and (a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3]):
-            tp[(r,c,s,d)][a][n] = 1
+    # Identify the "correct" neighbor (the intended move)
+    correct_neighbor = None
+    for n in neighbors:
+        if (s == 0):
+            if ((c, r) == (n[0], n[1])) and (a[2] == n[2]) and (actionToDir((a[0], a[1])) == n[3]):
+                correct_neighbor = n
+                break
         else:
-            tp[(r,c,s,d)][a][n] = 0
+            if ((s * a[0] + c, s * a[1] + r) == (n[0], n[1]) 
+                and (s + a[2] == n[2]) 
+                and (actionToDir((a[0], a[1])) == n[3])):
+                correct_neighbor = n
+                break
 
-    elif (d == n[3]):
-        if (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3])):
-                tp[(r,c,s,d)][a][n] = 0.99
-            else:
-                tp[(r,c,s,d)][a][n] = 0.01
-        elif not (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3])):
-                tp[(r,c,s,d)][a][n] = 0.95
-            else:
-                tp[(r,c,s,d)][a][n] = 0.05
-                
-    elif not (d == n[3]):
-        if (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3])):
-                tp[(r,c,s,d)][a][n] = 0.95
-            else:
-                tp[(r,c,s,d)][a][n] = 0.05
-        elif not (a[2] == 0):
-            if((s * a[0] + r, s * a[1] + c) == (n[0],n[1]) and (s + a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3])):
+    # Assign main probability based on direction/speed match
+    if (c, r) in end_goal:
+        probs = {n: 1.0 if n == (c, r, s, d) else 0.0 for n in neighbors}
+        tp[(c, r, s, d)][a] = probs
+        continue
+    elif s == 0:
+        main_prob = 1.0
+    elif correct_neighbor and d == correct_neighbor[3]:
+        main_prob = 0.99 if a[2] == 0 else 0.95
+    else:
+        main_prob = 0.95 if a[2] == 0 else 0.85
 
-                tp[(r,c,s,d)][a][n] = 0.85
+    # Distribute leftover probability to others
+    if correct_neighbor:
+        num_others = len(neighbors) - 1
+        if num_others > 0:
+            other_prob = (1.0 - main_prob) / num_others
+        else:
+            other_prob = 0.0
+
+        for n in neighbors:
+            if n == correct_neighbor:
+                probs[n] = main_prob
             else:
-                tp[(r,c,s,d)][a][n] = 0.15
+                probs[n] = other_prob
+    else:
+        # No correct neighbor (edge case) -> uniform distribution
+        uniform_prob = 1.0 / len(neighbors)
+        probs = {n: uniform_prob for n in neighbors}
+
+    tp[(c, r, s, d)][a] = probs
 
 """
 FlatGridWorld
@@ -416,6 +434,7 @@ FlatGridWorld
 The FlatGridWorld class defines the environment in which the agent learns. It contains methods such as render and update world. It mainly contains 
 logic for displaying the visualization. 
 """
+
 class FlatGridWorld:
     def __init__(self, size, agents, obstacles=[]):
         self.size = SIZE  # grid is size x size
@@ -514,13 +533,13 @@ class Agent:
         self.beta = beta
 
 
-        self.qtable = {(r,c,s,d): {} for r,c in product(range(SIZE), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
+        self.qtable = {(c,r,s,d): {} for c,r in product(range(SIZE), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
 
         for r,c in product(range(24), repeat = 2):
             for s in (0,1,2):
                 for d in (1,2,3,4):
-                    for a in legal_actions_cache[(r,c,s,d)]:
-                        self.qtable[(r,c,s,d)][a] = 0
+                    for a in legal_actions_cache[(c,r,s,d)]:
+                        self.qtable[(c,r,s,d)][a] = 0
 
         self.reset()
 
@@ -583,17 +602,6 @@ class Agent:
         samples = []
         next_states = list(tp[self.state][action].keys())
         probs = list(tp[self.state][action].values())
-
-        """
-        if not next_states:
-            raise ValueError(f"No next states for state {self.state} and action {action}")
-
-        if sum(probs) == 0:
-            print(f"Zero probability transitions for state {self.state} and action {action}")
-            print(f"next_states: {next_states}")
-            print(f"probs: {probs}")
-            raise ValueError(f"Total probability weights are zero for state {self.state} and action {action}")
-        """
             
         for _ in range(n_samples):
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
