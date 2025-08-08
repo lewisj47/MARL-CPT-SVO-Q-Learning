@@ -27,14 +27,14 @@ end_goal.extend([(r, c) for c in range(9,12) for r in range(22, 24)])
 routes = {}
 
 #From bottom to top
-route_1 = [(13, r) for r in range(0, 23)]
-lane_1 = [(r,c) for r in range(12,14) for c in range(0,23)]
+route_1 = [(13, r) for r in range(0, 24)]
+lane_1 = [(r,c) for r in range(12,14) for c in range(0,24)]
 
 #From bottom to right
-route_2 = [(13,r) for r in range (0, 10)]
+route_2 = [(13,r) for r in range (0, 11)]
 lane_2 = [(r,c) for r in range(12,15) for c in range(0,12)]
-route_2.extend([(r,10) for r in range(13,22)])
-lane_2.extend([(r,c) for r in range(13,22) for c in range(9,12)])
+route_2.extend([(r,10) for r in range(13,24)])
+lane_2.extend([(r,c) for r in range(13,24) for c in range(9,12)])
 
 
 #Populating route dictionary
@@ -124,7 +124,7 @@ def main():
             agents[0].updateQ(action)                   #Update q-value for agent i having taken action at state
 
             totReward = 0                               #Total cumulative reward per episode
-            totReward += rewardFunction((agents[0].state[0], agents[0].state[1]), action)
+            totReward += rewardFunction(agents[0].state, action)
 
             env.updateWorld(agents[0], action)          #Update agent positions and speeds
             env.render()                                #Render in visualization
@@ -347,8 +347,7 @@ def notMoving(state, action):
     if state[2] == 0 and action[2] == 0:
         return 1
     else:
-        return -0.7
-
+        return 0
 
 """
 rewardFunction(state, action)
