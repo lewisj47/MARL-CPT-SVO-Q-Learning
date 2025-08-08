@@ -17,16 +17,16 @@ args = parser.parse_args()
 
 end_goal = []
 #end_goal.extend([(r, c) for c in range(23, 24) for r in range(9, 15)])
-end_goal.extend([(r, c) for c in range(9,15) for r in range(23, 24)])
+end_goal.extend([(c, r) for c in range(22,24) for r in range(9, 12)])
 
 routes = {}
-route_1 = [(13, r) for r in range(0, 23)]
-lane_1 = [(r,c) for r in range(12,14) for c in range(0,23)]
+route_1 = [(13, r) for r in range(0, 24)]
+lane_1 = [(c,r) for c in range(12,15) for r in range(0,24)]
 
-route_2 = [(13,r) for r in range (0, 10)]
-lane_2 = [(r,c) for r in range(12,15) for c in range(0,12)]
-route_2.extend([(r,10) for r in range(13,23)])
-lane_2.extend([(r,c) for r in range(13,23) for c in range(9,12)])
+route_2 = [(13,r) for r in range(0, 11)]
+lane_2 = [(c,r) for c in range(12,15) for r in range(0,12)]
+route_2.extend([(c,10) for c in range(13,24)])
+lane_2.extend([(c,r) for c in range(13,24) for r in range(9,12)])
 
 routes["1"] = {"Route": route_1, "Lane": lane_1}
 routes["2"] = {"Route": route_2, "Lane": lane_2}
@@ -55,79 +55,66 @@ num_episodes = args.episodes
 all_sqrs = [(r,c) for r in range(SIZE) for c in range(SIZE)]
 corner_sqrs = [(0,0),(0,SIZE), (SIZE, 0), (SIZE, SIZE)]
 
-action_set = [(1,0,-1),(1,0,0),(1,0,1),(0,1,-1),(0,1,0),(0,1,1),(-1,0,-1),(-1,0,0),(-1,0,1),(0,-1,-1),(0,-1,0),(0,-1,1),(0,0,-1),(0,0,0),(0,0,1)]
 speed_set = [0,1,2]
 dir_set = [1,2,3,4] # 1:right, 2:up, 3:left, 4:down
 
-n_actions = len(action_set)
-n_states = len(all_sqrs) * len(speed_set) * len(dir_set)
-
 
 #Constants
-C = 0.95
-
-lr = 0.2
 discount = 0.9
 max_epsilon = 1.0
 min_epsilon = 0.01
 target_epsilon = 0.011
-
 decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / num_episodes
 
 
 #Global Variables
 t = 0
-t_e = 0
-epsilon = 1
-finish_n = 0
 
 
 def main():
-    global epsilon
-    global t_e
     global t
-    global finish_n
-    
-    
+    epsilon = 1
+    finish_n = 0
+    lr = 0.2
+        
     
     agents = [Agent(agent_n = 1, start = (13, 0, 1, 2), state = (0, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
     env = FlatGridWorld(size=SIZE, agents=agents, obstacles=(Obs1,Obs2,Obs3))
 
     
     for i in tqdm(range(num_episodes)):
+        is_testing = i >= num_episodes - 10
+        if is_testing:
+            epsilon = 0.0
+            lr = 0.0
+        else:
+            epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i)
+            lr = 0.2
+        
+        print(epsilon, lr)
+
         agents[0].reset()
         while True:
             action = agents[0].getAction(epsilon)
 
-            agents[0].updateQ(action)
+            agents[0].updateQ(action, lr)
 
             env.updateWorld(agents[0], action)
             env.render()
 
-            #Show the visualization
-            #if (t_e > args.episodes - 10):
             plt.ion()
             plt.show()
             plt.pause(0.0001)
            
-            if (t > 250):
+            x, y, s, d = agents[0].state
+
+            if (x, y) in end_goal or (x, y) in totObs or not neighbor_cache.get((x, y, s, d), False):
                 t = 0
+                if (x, y) in end_goal:
+                    finish_n += 1
                 break
 
-            if (agents[0].state[0], agents[0].state[1]) in end_goal:
-                t = 0
-                finish_n += 1
-                break
-            
-            if (agents[0].state[0], agents[0].state[1]) in totObs:
-                t = 0
-                break
-
-
-        epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * t_e)
-        t_e += 1
-
-    print(f"Agent reached the goal {finish_n} times, {(finish_n / args.episodes) * 100}% of all episodes.")
+    print(f"Agent reached the goal {finish_n} times, {(finish_n / args.episodes) * 100:.2f}% of all episodes.")
 
     with open("qtable_output.txt", "w") as f:
         pprint.pprint(agents[0].qtable, stream=f)
@@ -184,7 +171,7 @@ def neighboringStates(state):
     return valid
 
 neighbor_cache = {
-    (r, c, s, d): neighboringStates((r,c,s,d)) for r in range(SIZE) for c in range(SIZE) for s in speed_set for d in dir_set
+    (c, r, s, d): neighboringStates((c,r,s,d)) for c in range(SIZE) for r in range(SIZE) for s in speed_set for d in dir_set
 }
 
 def dirToAction(dir):
@@ -207,14 +194,14 @@ def actionToDir(action):
 
 
 def getLegalActions(state):
-    r, c, s, d = state
+    c, r, s, d = state
     possible_actions = [(1,0), (-1,0), (0,1), (0,-1)]
 
     dir_vec = dirToAction(d)
     dir_backwards = (-dir_vec[0], -dir_vec[1])
 
     if Goal(state):
-        return [0]
+        return [(0, 0, 0)]
     
     legal_actions = []
     neighbors = set(neighbor_cache[state])
@@ -222,11 +209,11 @@ def getLegalActions(state):
     if s == 0:
         for acc in (0, 1):
             for dx, dy in possible_actions:
-                new_r = r + dx
-                new_c = c + dy
+                new_c = c + dx
+                new_r = r + dy
                 new_d = actionToDir((dx, dy))
                 new_s = s + acc
-                new_state = (new_r, new_c, new_s, new_d)
+                new_state = (c, r, new_s, new_d)
                 if new_state in neighbors:
                     legal_actions.append((dx, dy, acc))
     
@@ -235,21 +222,21 @@ def getLegalActions(state):
             for dx, dy in possible_actions:
                 if (dx, dy) == dir_backwards:
                     continue
-                new_r = r + dx
-                new_c = c + dy
+                new_c = c + dx
+                new_r = r + dy
                 new_d = actionToDir((dx, dy))
                 new_s = s + acc
-                new_state = (new_r, new_c, new_s, new_d)
+                new_state = (new_c, new_r, new_s, new_d)
                 if new_state in neighbors:
                     legal_actions.append((dx, dy, acc))
 
     elif s == 2:
         for acc in (-1, 0):
             dx, dy = dir_vec
-            new_r = r + s * dx
-            new_c = c + s * dy
+            new_c = c + s * dx
+            new_r = r + s * dy
             new_s = s + acc
-            new_state = (new_r, new_c, new_s, d)
+            new_state = (new_c, new_r, new_s, d)
             if new_state in neighbors:
                 legal_actions.append((dx, dy, acc))
     #print(legal_actions)
@@ -258,7 +245,7 @@ def getLegalActions(state):
 
 
 legal_actions_cache = {
-    (r, c, s, d): getLegalActions((r, c, s, d)) for r in range(SIZE) for c in range(SIZE) for s in speed_set for d in dir_set
+    (c, r, s, d): getLegalActions((c, r, s, d)) for c in range(SIZE) for r in range(SIZE) for s in speed_set for d in dir_set
 }
 
 def onRoute(state, route):
@@ -266,26 +253,95 @@ def onRoute(state, route):
     if (state[0], state[1]) in route["Route"]:
         return (route["Route"].index((state[0],state[1]))/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
-        return 0
+        return (route["Lane"].index((state[0],state[1]))/(5 * SIZE))
     else:
-        return -0.7
+        return 0
+
+def notMoving(state, action):
+    if state[2] == 0 and action[2] == 0:
+        return 1
+    else:
+        return 0
 
 
-#Still need to add reward for stop sign stoppage and collision avoidance
 def rewardFunction(state, action):
     const1 = 1000   # Reward for reaching the goal
     const2 = 100    # Penalty for hitting an obstacle
-    const3 = 10     # Reward for being on the route
-    const4 = 1      # Penalty for accelerating or decelerating
-    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]))
+    const3 = 1000     # Reward for being on the route
+    const4 = 0.5    # Penalty for accelerating or decelerating
+    const5 = 1      # Penalty for not moving
+    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action))
   
 
-tp = {(r,c,s,d): {a: {} for a in legal_actions_cache[(r, c, s, d)]} 
-    for r in range(SIZE)
+tp = {(c,r,s,d): {a: {} for a in legal_actions_cache[(c, r, s, d)]} 
     for c in range(SIZE)
+    for r in range(SIZE)
     for s in speed_set
     for d in dir_set}
 
+for key, actions in legal_actions_cache.items():
+    for act in actions:
+        if not isinstance(act, tuple) or len(act) != 3:
+            print(f"Bad action format at {key}: {act}")
+
+for c, r, s, d, a in [
+    (c, r, s, d, a)
+    for c in range(SIZE)
+    for r in range(SIZE)
+    for s in speed_set
+    for d in dir_set
+    for a in legal_actions_cache[(c, r, s, d)]
+]:
+    neighbors = neighbor_cache[(c, r, s, d)]
+    probs = {}
+    
+    # Identify the "correct" neighbor (the intended move)
+    correct_neighbor = None
+    for n in neighbors:
+        if (s == 0):
+            if ((r, c) == (n[0], n[1])) and (a[2] == n[2]) and (actionToDir((a[0], a[1])) == n[3]):
+                correct_neighbor = n
+                break
+        else:
+            if ((s * a[0] + r, s * a[1] + c) == (n[0], n[1]) 
+                and (s + a[2] == n[2]) 
+                and (actionToDir((a[0], a[1])) == n[3])):
+                correct_neighbor = n
+                break
+
+    # Assign main probability based on direction/speed match
+    if (c, r) in end_goal:
+        probs = {n: 1.0 if n == (c, r, s, d) else 0.0 for n in neighbors}
+        tp[(c, r, s, d)][a] = probs
+        continue
+    elif s == 0:
+        main_prob = 1.0
+    elif correct_neighbor and d == correct_neighbor[3]:
+        main_prob = 0.99 if a[2] == 0 else 0.95
+    else:
+        main_prob = 0.95 if a[2] == 0 else 0.85
+
+    # Distribute leftover probability to others
+    if correct_neighbor:
+        num_others = len(neighbors) - 1
+        if num_others > 0:
+            other_prob = (1.0 - main_prob) / num_others
+        else:
+            other_prob = 0.0
+
+        for n in neighbors:
+            if n == correct_neighbor:
+                probs[n] = main_prob
+            else:
+                probs[n] = other_prob
+    else:
+        # No correct neighbor (edge case) -> uniform distribution
+        uniform_prob = 1.0 / len(neighbors)
+        probs = {n: uniform_prob for n in neighbors}
+
+    tp[(c, r, s, d)][a] = probs
+
+"""
 gen = list(
     (r, c, s, d, a, n)
     for r in range(SIZE)
@@ -301,7 +357,7 @@ for r,c,s,d,a,n in gen:
         tp[(r,c,s,d)][a][n] = 0 
     
     elif (s == 0):
-        if ((r, c) == (n[0],n[1])) and (a[2] == n[2]) and (actionDir((a[0],a[1])) == n[3]):
+        if ((r, c) == (n[0],n[1])) and (a[2] == n[2]) and (actionToDir((a[0],a[1])) == n[3]):
             tp[(r,c,s,d)][a][n] = 1
         else:
             tp[(r,c,s,d)][a][n] = 0
@@ -330,7 +386,7 @@ for r,c,s,d,a,n in gen:
                 tp[(r,c,s,d)][a][n] = 0.85
             else:
                 tp[(r,c,s,d)][a][n] = 0.15
-
+"""
 #This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
 #one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
 class FlatGridWorld:
@@ -404,13 +460,13 @@ class Agent:
         self.beta = beta
 
 
-        self.qtable = {(r,c,s,d): {} for r,c in product(range(SIZE), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
+        self.qtable = {(c,r,s,d): {} for c,r in product(range(SIZE), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
 
         for r,c in product(range(24), repeat = 2):
             for s in (0,1,2):
                 for d in (1,2,3,4):
-                    for a in legal_actions_cache[(r,c,s,d)]:
-                        self.qtable[(r,c,s,d)][a] = 0
+                    for a in legal_actions_cache[(c,r,s,d)]:
+                        self.qtable[(c,r,s,d)][a] = 0
 
         self.reset()
 
@@ -451,7 +507,7 @@ class Agent:
             action = self.getPolicy()
         return action
 
-    def updateQ(self, action):
+    def updateQ(self, action, lr):
         """
             Performs the CPT-based Q-value update by using samples for the estimated future Q-value
         """
@@ -472,17 +528,6 @@ class Agent:
         samples = []
         next_states = list(tp[self.state][action].keys())
         probs = list(tp[self.state][action].values())
-
-        """
-        if not next_states:
-            raise ValueError(f"No next states for state {self.state} and action {action}")
-
-        if sum(probs) == 0:
-            print(f"Zero probability transitions for state {self.state} and action {action}")
-            print(f"next_states: {next_states}")
-            print(f"probs: {probs}")
-            raise ValueError(f"Total probability weights are zero for state {self.state} and action {action}")
-        """
             
         for _ in range(n_samples):
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
@@ -519,21 +564,6 @@ class Agent:
 
         return rho
       
-    
-    """
-    def value_function(self, reward):
-        alpha = self.alpha
-        if reward >= 0:
-            return reward ** alpha
-        else:
-            return -self.lamda * ((-reward) ** alpha)
-
-    def weight_function(self, p, mode):
-        gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
-        return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
-    
-    """  
-    
     def getPolicy(self):
         """
         Compute best action to take in a state. Will need to add 
