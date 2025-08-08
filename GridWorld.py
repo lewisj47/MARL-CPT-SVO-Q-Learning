@@ -16,8 +16,8 @@ parser.add_argument("episodes", type=int, help="The number of episodes to underg
 args = parser.parse_args()
 
 end_goal = []
-#end_goal.extend([(r, c) for c in range(23, 24) for r in range(9, 15)])
-end_goal.extend([(c, r) for c in range(22,24) for r in range(9, 12)])
+end_goal.extend([(c, r) for c in range(12, 15) for r in range(22, 24)])
+#end_goal.extend([(c, r) for c in range(22,24) for r in range(9, 12)])
 
 routes = {}
 route_1 = [(13, r) for r in range(0, 24)]
@@ -270,7 +270,7 @@ def rewardFunction(state, action):
     const3 = 1000     # Reward for being on the route
     const4 = 0.5    # Penalty for accelerating or decelerating
     const5 = 1      # Penalty for not moving
-    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action))
+    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['1']) - const4 * abs(action[2]) - const5 * notMoving(state, action))
   
 
 tp = {(c,r,s,d): {a: {} for a in legal_actions_cache[(c, r, s, d)]} 
@@ -299,11 +299,11 @@ for c, r, s, d, a in [
     correct_neighbor = None
     for n in neighbors:
         if (s == 0):
-            if ((r, c) == (n[0], n[1])) and (a[2] == n[2]) and (actionToDir((a[0], a[1])) == n[3]):
+            if ((c, r) == (n[0], n[1])) and (a[2] == n[2]) and (actionToDir((a[0], a[1])) == n[3]):
                 correct_neighbor = n
                 break
         else:
-            if ((s * a[0] + r, s * a[1] + c) == (n[0], n[1]) 
+            if ((s * a[0] + c, s * a[1] + r) == (n[0], n[1]) 
                 and (s + a[2] == n[2]) 
                 and (actionToDir((a[0], a[1])) == n[3])):
                 correct_neighbor = n
@@ -340,6 +340,7 @@ for c, r, s, d, a in [
         probs = {n: uniform_prob for n in neighbors}
 
     tp[(c, r, s, d)][a] = probs
+
 
 """
 gen = list(
@@ -412,7 +413,7 @@ class FlatGridWorld:
             if coord in end_goal:
                 grid[coord] = 0.8
 
-        for i in routes["2"]["Route"]:
+        for i in routes["1"]["Route"]:
             grid[i] = 0.2
 
         for i in range(n_agents):
