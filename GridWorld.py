@@ -20,7 +20,7 @@ end_goal = []
 #end_goal.extend([(r, c) for c in range(23, 24) for r in range(9, 15)])
 
 #End goal on the right
-end_goal.extend([(r, c) for c in range(9,12) for r in range(22, 24)])
+end_goal.extend([(c,r) for r in range(9,12) for c in range(22, 24)])
 
 
 #Routes are used in the reward function to reward the agent for making progress towards the goal
@@ -28,13 +28,14 @@ routes = {}
 
 #From bottom to top
 route_1 = [(13, r) for r in range(0, 24)]
-lane_1 = [(r,c) for r in range(12,14) for c in range(0,24)]
+lane_1 = [(c,r) for r in range(0,24) for c in range(12,15)]
+
 
 #From bottom to right
 route_2 = [(13,r) for r in range (0, 11)]
-lane_2 = [(r,c) for r in range(12,15) for c in range(0,12)]
-route_2.extend([(r,10) for r in range(13,24)])
-lane_2.extend([(r,c) for r in range(13,24) for c in range(9,12)])
+lane_2 = [(c,r) for r in range(0,12) for c in range(12,15)]
+route_2.extend([(c,10) for c in range(13,24)])
+lane_2.extend([(c,r) for c in range(13,24) for r in range(9,12)])
 
 
 #Populating route dictionary
@@ -46,16 +47,16 @@ routes["2"] = {"Route": route_2, "Lane": lane_2}
 totObs = []
 
 #Bottom left obstacle
-Obs1 = [(r, c) for r in range(0,9) for c in range(0,9)]
+Obs1 = [(c, r) for c in range(0,9) for r in range(0,9)]
 totObs.extend(Obs1)
 #Bottom right obstacle
-Obs2 = [(r, c) for r in range(15, 24) for c in range(0,9)]
+Obs2 = [(c, r) for c in range(15, 24) for r in range(0,9)]
 totObs.extend(Obs2)
 #Top right Obstacle
-Obs3 = [(r, c) for r in range(15,24) for c in range(15,24)]
+Obs3 = [(c, r) for c in range(15,24) for r in range(15,24)]
 totObs.extend(Obs3)
 #Top left obstacle
-Obs4 = [(r, c) for r in range (0, 9) for c in range(15, 24)]
+Obs4 = [(c, r) for c in range (0, 9) for r in range(15, 24)]
 totObs.extend(Obs4)
 
 #Environment Definitions
@@ -99,6 +100,7 @@ t = 0
 
 
 def main():
+
     global t
 
     epsilon = 1
@@ -117,13 +119,14 @@ def main():
 
     for i in tqdm(range(num_episodes)):
         agents[0].reset()                               #Reset agent states
+        totReward = 0                                   #Total cumulative reward per episode
 
         while True:
             action = agents[0].getAction(epsilon)       #Get an action for agent i
 
             agents[0].updateQ(action)                   #Update q-value for agent i having taken action at state
 
-            totReward = 0                               #Total cumulative reward per episode
+            
             totReward += rewardFunction(agents[0].state, action)
 
             env.updateWorld(agents[0], action)          #Update agent positions and speeds
@@ -144,13 +147,19 @@ def main():
                     finish_n += 1
                 break
 
-        rewardGraph.append(totReward) #Extend list of cumulative rewards per episode
-
         epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
 
+        if ((i % 100 == 0) and not (i == 0)):
+            tqdm.write(f"Average Reward for last 100 episodes, {i}th episode: {(sum(rewardGraph[a] for a in range(i - 100,i)) / 100)}")
+        
+        rewardGraph.append(totReward) #Extend list of cumulative rewards per episode
+        window_size = 50
+        moving_avg = np.convolve(rewardGraph, np.ones(window_size)/window_size, mode='valid')
+
     plt.ioff()  # Turn off interactive mode if it was on
+
     plt.figure()  # ✅ Start a new figure window
-    plt.plot(range(1, num_episodes + 1), rewardGraph, label='Reward per Episode')
+    plt.plot(range(window_size, num_episodes + 1), moving_avg, label=f'{window_size}-Reward per Episode')
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
     plt.title('Reward per Episode')
@@ -337,9 +346,9 @@ so the agent will recieve a higher reward for being on a route square closer to 
 def onRoute(state, route):
 
     if (state[0], state[1]) in route["Route"]:
-        return (route["Route"].index((state[0],state[1]))/SIZE)
+        return ((1 + route["Route"].index((state[0],state[1])))/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
-        return (route["Lane"].index((state[0],state[1]))/(5 * SIZE))
+        return ((1 + route["Lane"].index((state[0],state[1])))/(5 * SIZE))
     else:
         return 0
 
@@ -358,9 +367,10 @@ hitting an obstacle, and being on the route are important to the reward function
 def rewardFunction(state, action):
     const1 = 1000   # Reward for reaching the goal
     const2 = 100    # Penalty for hitting an obstacle
-    const3 = 1000     # Reward for being on the route
+    const3 = 250     # Reward for being on the route
     const4 = 0.5    # Penalty for accelerating or decelerating
-    const5 = 1      # Penalty for not moving
+    const5 = 5      # Penalty for not moving
+
     return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action))
   
 
