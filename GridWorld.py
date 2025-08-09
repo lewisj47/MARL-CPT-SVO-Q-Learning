@@ -28,32 +28,33 @@ routes = {}
 
 #From bottom to top
 route_1 = [(13, r) for r in range(0, 24)]
-lane_1 = [(c,r) for r in range(0,24) for c in range(12,15)]
-
+lane_1 = [(c, r) for r in range(0, 24) for c in range(12, 15)]
 
 #From bottom to right
-route_2 = [(13,r) for r in range (0, 11)]
-lane_2 = [(c,r) for r in range(0,12) for c in range(12,15)]
-route_2.extend([(c,10) for c in range(13,24)])
-lane_2.extend([(c,r) for c in range(13,24) for r in range(9,12)])
-
+route_2 = [(13, r) for r in range (0, 11)]
+lane_2 = [(c, r) for r in range(0, 12) for c in range(12, 15)]
+route_2.extend([(c, 10) for c in range(13, 24)])
+lane_2.extend([(c, r) for c in range(13, 24) for r in range(9, 12)])
 
 #Populating route dictionary
 routes["1"] = {"Route": route_1, "Lane": lane_1}
 routes["2"] = {"Route": route_2, "Lane": lane_2}
 
+#Stop sign regions
+stop_region = [(c, 8) for c in range(12, 15)]
+slow_region = [(c,7) for c in range(12, 15)]
 
 #An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
 totObs = []
 
 #Bottom left obstacle
-Obs1 = [(c, r) for c in range(0,9) for r in range(0,9)]
+Obs1 = [(c, r) for c in range(0, 9) for r in range(0, 9)]
 totObs.extend(Obs1)
 #Bottom right obstacle
-Obs2 = [(c, r) for c in range(15, 24) for r in range(0,9)]
+Obs2 = [(c, r) for c in range(15, 24) for r in range(0, 9)]
 totObs.extend(Obs2)
 #Top right Obstacle
-Obs3 = [(c, r) for c in range(15,24) for r in range(15,24)]
+Obs3 = [(c, r) for c in range(15, 24) for r in range(15, 24)]
 totObs.extend(Obs3)
 #Top left obstacle
 Obs4 = [(c, r) for c in range (0, 9) for r in range(15, 24)]
@@ -73,18 +74,11 @@ all_sqrs = [(r,c) for r in range(SIZE) for c in range(SIZE)]
 #Corner sqrs in the grid world
 corner_sqrs = [(0,0),(0,SIZE), (SIZE, 0), (SIZE, SIZE)]
 
-#All available actions to the agent
-action_set = [(1,0,-1),(1,0,0),(1,0,1),(0,1,-1),(0,1,0),(0,1,1),(-1,0,-1),(-1,0,0),(-1,0,1),(0,-1,-1),(0,-1,0),(0,-1,1)]
-#All speeds the agent can be driving at
 
-speed_set = [0,1,2]
+speed_set = [0, 1, 2]
 #All directions the agent can be driving in
-dir_set = [1,2,3,4] # 1:right, 2:up, 3:left, 4:down
+dir_set = [1, 2, 3, 4] # 1:right, 2:up, 3:left, 4:down
 
-#Length of the action set
-n_actions = len(action_set)
-#Length of the state set
-n_states = len(all_sqrs) * len(speed_set) * len(dir_set)
 
 
 #Constants
@@ -108,19 +102,24 @@ def main():
     #Number of episodes where the agent makes it to the finish line
     finish_n = 0
     
-    
+    reward = 0
+
     #List containing all agent objects
     agents = [Agent(agent_n = 1, start = (13, 0, 1, 2), state = (13, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
     #Environment object that is updated and rendered
     env = FlatGridWorld(size=SIZE, agents=agents, obstacles=(Obs1,Obs2,Obs3))
 
     #Contains all datapoints for cumulative reward per episode which is then graphed once the training session is over
-    rewardGraph = []
+    #rewardGraph = []
 
     for i in tqdm(range(num_episodes)):
         agents[0].reset()                               #Reset agent states
         totReward = 0                                   #Total cumulative reward per episode
 
+        if i % 100 == 0:                             #Print progress every 100 episodes
+            avg_reward = reward / 100 if i > 0 else 0
+            tqdm.write(f"Average Reward for last 100 episodes: {avg_reward:.2f}")
+            reward = 0
         while True:
             action = agents[0].getAction(epsilon)       #Get an action for agent i
 
@@ -167,7 +166,7 @@ def main():
     plt.legend()
     plt.show()
     plt.savefig("reward_plot.png")  # Save as image file
-    
+    """
     print(f"Agent reached the goal {finish_n} times, {(finish_n / args.episodes) * 100}% of all episodes.")
 
     with open("qtable_output.txt", "w") as f:
@@ -344,7 +343,6 @@ multiplied by a constant, and given to the agent as a reward. The route lists ar
 so the agent will recieve a higher reward for being on a route square closer to the goal. 
 """
 def onRoute(state, route):
-
     if (state[0], state[1]) in route["Route"]:
         return ((1 + route["Route"].index((state[0],state[1])))/SIZE)
     elif (state[0], state[1]) in route["Lane"]:
@@ -355,6 +353,26 @@ def onRoute(state, route):
 def notMoving(state, action):
     if state[2] == 0 and action[2] == 0:
         return 1
+    else:
+        return 0
+
+def stopArea(state, action):
+    if (state[0], state[1]) in stop_region:
+        if state[2] == 0 and action[2] == 1:
+            return 1
+        elif state[2] == 0 and action[2] == 0:
+            return 0
+        else:
+            return -1
+    else:
+        return 0
+
+def slowArea(state, action):
+    if (state[0], state[1]) in slow_region:
+        if state[2] == 1 and action[2] == -1:
+            return 1
+        else:
+            return 0
     else:
         return 0
 
@@ -369,9 +387,10 @@ def rewardFunction(state, action):
     const2 = 100    # Penalty for hitting an obstacle
     const3 = 250     # Reward for being on the route
     const4 = 0.5    # Penalty for accelerating or decelerating
-    const5 = 5      # Penalty for not moving
-
-    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action))
+    const5 = 10      # Penalty for not moving
+    const6 = 200
+    const7 = 100
+    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action) + const6 * stopArea(state, action) + const7 * slowArea(state, action))
   
 
 tp = {(c,r,s,d): {a: {} for a in legal_actions_cache[(c, r, s, d)]} 
@@ -468,11 +487,9 @@ class FlatGridWorld:
         for coord in end_goal:
             grid[coord] = 0.8
 
-        grid[(1,0)] = 0.8
-
         for i in routes["2"]["Route"]:
             grid[i] = 0.2
-
+        
         speed_color_map = {
             0: 'green',
             1: 'yellow',
@@ -494,8 +511,8 @@ class FlatGridWorld:
          fontsize=10, color='black', 
          verticalalignment='bottom', horizontalalignment='left')
 
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
-        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', (1,1,0,0.5), (1,0,0,0.5)])
+        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2, 2.5]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
         plt.imshow(grid.T, cmap=cmap, norm=norm)
@@ -505,6 +522,7 @@ class FlatGridWorld:
         plt.axhline(xmax = 0.35, y = 11.5, color = 'yellow', linestyle='--')
         plt.axvline(ymin = 0.65, x= 11.5, color='yellow', linestyle='--')
         plt.axvline(ymax = 0.35, x = 11.5, color='yellow', linestyle='--')
+        plt.axhline(y=8, xmin=0.5, xmax=0.65, color='white', linestyle='-')
 
         ax = plt.gca()
         ax.invert_yaxis()
