@@ -15,13 +15,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
 args = parser.parse_args()
 
-end_goal = []
+end_goal_1 = []
+end_goal_2 = []
+
 #End goal at the top
-#end_goal.extend([(r, c) for c in range(23, 24) for r in range(9, 15)])
+end_goal_1.extend([(c, r) for c in range(12, 15) for r in range(23, 24)])
 
 #End goal on the right
-end_goal.extend([(c,r) for r in range(9,12) for c in range(22, 24)])
-
+end_goal_2.extend([(c,r) for c in range(22, 24) for r in range(9, 12)])
 
 #Routes are used in the reward function to reward the agent for making progress towards the goal
 routes = {}
@@ -36,9 +37,14 @@ lane_2 = [(c, r) for r in range(0, 12) for c in range(12, 15)]
 route_2.extend([(c, 10) for c in range(13, 24)])
 lane_2.extend([(c, r) for c in range(13, 24) for r in range(9, 12)])
 
+#From left to right
+route_3 = [(c, 10) for c in range(0, 24)]
+lane_3 = [(c, r) for c in range(0, 24) for r in range(9, 12)]
+
 #Populating route dictionary
-routes["1"] = {"Route": route_1, "Lane": lane_1}
-routes["2"] = {"Route": route_2, "Lane": lane_2}
+routes["1"] = {"Route": route_1, "Lane": lane_1, "End Goal": end_goal_1}
+routes["2"] = {"Route": route_2, "Lane": lane_2, "End Goal": end_goal_2}
+routes["3"] = {"Route": route_3, "Lane": lane_3, "End Goal": end_goal_2}
 
 #Stop sign regions
 stop_region = [(c, 8) for c in range(12, 15)]
@@ -63,7 +69,7 @@ totObs.extend(Obs4)
 #Environment Definitions
 
 #Number of agents
-n_agents = 1
+n_agents = 2
 #Size of grid
 SIZE = 24
 #Number of episodes passed as an argument in the command line
@@ -82,15 +88,17 @@ dir_set = [1, 2, 3, 4] # 1:right, 2:up, 3:left, 4:down
 
 
 #Constants
-lr = 0.5
-discount = 0.9
+alpha0 = 0.2
+alpha_pow = 0.5
+discount = 0.98
 max_epsilon = 1.0
-min_epsilon = 0.01
-target_epsilon = 0.011
+min_epsilon = 0.05
+target_epsilon = 0.051
 decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / num_episodes
 
 #T used to measure the number of ticks in a single episode
 t = 0
+
 
 
 def main():
@@ -99,88 +107,120 @@ def main():
 
     epsilon = 1
 
-    #Number of episodes where the agent makes it to the finish line
+    #Number of episodes where the agents make it to the finish line
     finish_n = 0
+
+    #Number of collisions that occur
+    collision_n = 0
+
+    # Environment object that is updated and rendered
+    env = FlatGridWorld(size=SIZE, agents=[], obstacles=(Obs1, Obs2, Obs3, Obs4))
+
+    # List containing all agent objects
+    # Timid agent: lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, beta = 0.88, alpha = 0.88
+    agents = [
+        Agent(agent_n=1, route=routes['1'], start=(13, 0, 1, 2), state=(13, 0, 1, 2), phi=0, lamda=1, gamma_gain=1, gamma_loss=1, alpha=1, beta=1, env=env)
+        , Agent(agent_n=2, route=routes['3'], start=(0, 10, 1, 1), state=(0, 10, 1, 1), phi=0, lamda=1, gamma_gain=1, gamma_loss=1, alpha=1, beta=1, env=env)
+    ]
+
+    # Add agents to the environment
+    env.agents = agents
     
-    reward = 0
+    # Initialize the global state as a list of all agents' states
+    env.rebuildGlobalState()
 
-    #List containing all agent objects
-    agents = [Agent(agent_n = 1, start = (13, 0, 1, 2), state = (13, 0, 1, 2), phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88)]
-    #Environment object that is updated and rendered
-    env = FlatGridWorld(size=SIZE, agents=agents, obstacles=(Obs1,Obs2,Obs3))
+    tot_reward = np.zeros(n_agents)  
+    reward_window = np.zeros((n_agents, 50)) 
+    window_index = 0
 
-    #Contains all datapoints for cumulative reward per episode which is then graphed once the training session is over
-    #rewardGraph = []
+    for j in tqdm(range(num_episodes)):
+        for agent in agents:
+            agent.reset()  # Reset agent states
+            tot_reward[agent.agent_n - 1] = 0  # Reset total cumulative reward per episode
 
-    for i in tqdm(range(num_episodes)):
-        agents[0].reset()                               #Reset agent states
-        totReward = 0                                   #Total cumulative reward per episode
-
-        if i % 100 == 0:                             #Print progress every 100 episodes
-            avg_reward = reward / 100 if i > 0 else 0
-            tqdm.write(f"Average Reward for last 100 episodes: {avg_reward:.2f}")
-            reward = 0
         while True:
-            action = agents[0].getAction(epsilon)       #Get an action for agent i
+            # check if need lines for state_before
+            env.rebuildGlobalState()
+            state_before = env.global_state.copy()
 
-            agents[0].updateQ(action)                   #Update q-value for agent i having taken action at state
+            for agent in agents:
+                if (agent.state[0], agent.state[1]) in agent.route["End Goal"] or (agent.state[0], agent.state[1]) in totObs:
+                    continue
+                action = agent.getAction(state_before, epsilon)  # Get an action for the agent
+                if action is None:
+                    continue
+                agent.updateQ(state_before, action)  # Update q-value for the agent having taken action at state
 
-            
-            totReward += rewardFunction(agents[0].state, action)
+                tot_reward[agent.agent_n - 1] += rewardFunction(agent.state, agent.route, action, env)
 
-            env.updateWorld(agents[0], action)          #Update agent positions and speeds
-            env.render()                                #Render in visualization
+                env.updateWorld(agent, action)  # Update agent positions and speeds
 
-            #Show the visualization
-            #if (t_e > args.episodes - 10):
-            plt.ion()                                   #Activate interactive mode
-            plt.show()                                  #Show visualization
-            plt.pause(0.0001)                           #Pause between episodes in seconds
-           
+            env.rebuildGlobalState()
 
-            x, y, s, d = agents[0].state
+            # Check for collisions
+            if hasCollided(env.global_state):
+                print("Collision detected!")
+                collision_n += 1
+                break  # Exit the loop if a collision occurs
 
-            if (x, y) in end_goal or (x, y) in totObs or not neighbor_cache.get((x, y, s, d), False):
+            env.render()  # Render in visualization
+
+            # Show the visualization
+            plt.ion()  # Activate interactive mode
+            plt.show()  # Show visualization
+            plt.pause(0.0001)  # Pause between episodes in seconds
+
+            # Check for termination conditions
+            all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)
+            obs_hit = any((agent.state[0], agent.state[1]) in totObs for agent in agents)
+            all_stuck_or_finished = all(len(neighbor_cache[agent.state]) == 0 or (agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)
+
+            if all_finished or obs_hit or all_stuck_or_finished:
                 t = 0
-                if (x, y) in end_goal:
+                if all_finished:
                     finish_n += 1
-                break
+                    print(f"All agents reached the goal in episode {j + 1}!")
+                break  # Break out of the loop if any termination condition is met
+        reward_window[:, window_index] = tot_reward  # Store the total reward for each agent in the reward window
+        window_index = (window_index + 1) % 50  # Update the window index to cycle through the last 50 episodes
 
-        epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
+        epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * j) #Update epsilon according to decay rate
+        if (j % 50) == 0:
+            avg_rewards = reward_window.mean(axis=1)
+            print(f"Episode {j + 1}/{num_episodes} completed. Epsilon: {epsilon:.4f}")
+            for idx, avg in enumerate(avg_rewards, start=1):
+                print(f" Agent {idx} average reward (last 50 episodes): {avg:.2f}")
 
-        if ((i % 100 == 0) and not (i == 0)):
-            tqdm.write(f"Average Reward for last 100 episodes, {i}th episode: {(sum(rewardGraph[a] for a in range(i - 100,i)) / 100)}")
-        
-        rewardGraph.append(totReward) #Extend list of cumulative rewards per episode
-        window_size = 50
-        moving_avg = np.convolve(rewardGraph, np.ones(window_size)/window_size, mode='valid')
+    print(f"Agents reached the goal {finish_n} times, {(finish_n / args.episodes) * 100}% of all episodes.")
+    print(f"Collisions occurred {collision_n} times, {(collision_n / args.episodes) * 100}% of all episodes.")
 
-    plt.ioff()  # Turn off interactive mode if it was on
+    for agent in agents:
+        with open(f"qtable_output{agent.agent_n}.txt", "w") as f:
+            pprint.pprint(agent.qtable, stream=f)
 
-    plt.figure()  # ✅ Start a new figure window
-    plt.plot(range(window_size, num_episodes + 1), moving_avg, label=f'{window_size}-Reward per Episode')
-    plt.xlabel('Episode')
-    plt.ylabel('Total Reward')
-    plt.title('Reward per Episode')
-    plt.grid(True)
-    plt.legend()
-    plt.show()
-    plt.savefig("reward_plot.png")  # Save as image file
+
+def hasCollided(global_state):
     """
-    print(f"Agent reached the goal {finish_n} times, {(finish_n / args.episodes) * 100}% of all episodes.")
+    Checks if any two agents occupy the same position.
+    """
+    positions = [(state[0], state[1]) for state in global_state]  # Extract (x, y) positions
 
-    with open("qtable_output.txt", "w") as f:
-        pprint.pprint(agents[0].qtable, stream=f)
+    
+    return len(positions) != len(set(positions))  # Check for duplicates
 
 """
 Goal(state):
 
 This function returns one if the state passed is in the end_goal and zero if not
 """
-def Goal(state):
-    if ((state[0],state[1]) in end_goal):
+def Goal(state, route):
+    """
+    This function returns 1 if the state passed is in the agent's end goal and 0 otherwise.
+    """
+    if (state[0], state[1]) in route["End Goal"]:
         return 1
-    else: 
+
+    else:
         return 0
     
 """
@@ -202,11 +242,11 @@ This function returns all possible next states for an agent including available 
 def neighboringStates(state):
     valid = []
     if (state[2] == 0):
-        for s in (0,1):
+        for s in (0, 1):
             for d in dir_set:
                 valid.extend([(state[0], state[1], s, d)])
-    if (state[2] == 1):
-        for s in (0,1,2):
+    elif (state[2] == 1):
+        for s in (0, 1, 2):
             if state[3] == 1:
                 valid.extend([(state[0] + 1, state[1], s, 1),
                 (state[0], state[1] + 1, s, 2),
@@ -223,8 +263,8 @@ def neighboringStates(state):
                 valid.extend([(state[0] + 1, state[1], s, 1), 
                 (state[0] - 1, state[1], s, 3),
                 (state[0], state[1] - 1, s, 4)])
-    if state[2] == 2:
-        for s in (1,2):
+    elif state[2] == 2:
+        for s in (1, 2):
             if state[3] == 1:
                 valid.extend([(state[0] + 2, state[1], s, 1)])
             if state[3] == 2:
@@ -235,7 +275,6 @@ def neighboringStates(state):
                 valid.extend([(state[0], state[1] - 2, s, 4)])
     
     valid = [i for i in valid if 0 <= i[0] < SIZE and 0 <= i[1] < SIZE]
-    #print(valid)
     return valid
 
 #neighbor_cache is used so the neighboringStates function doesnt need to be called every time
@@ -283,9 +322,6 @@ def getLegalActions(state):
 
     dir_vec = dirToAction(d)
     dir_backwards = (-dir_vec[0], -dir_vec[1])
-
-    if Goal(state):
-        return [(0, 0, 0)]
     
     legal_actions = []
     neighbors = set(neighbor_cache[state])
@@ -299,10 +335,10 @@ def getLegalActions(state):
                 new_s = s + acc
 
                 new_state = (c, r, new_s, new_d)
-                
+
                 if new_state in neighbors:
                     legal_actions.append((dx, dy, acc))
-    
+
     elif s == 1:
         for acc in (-1, 0, 1):
             for dx, dy in possible_actions:
@@ -325,7 +361,7 @@ def getLegalActions(state):
             new_state = (new_c, new_r, new_s, d)
             if new_state in neighbors:
                 legal_actions.append((dx, dy, acc))
-    #print(legal_actions)
+
     return legal_actions    
 
 
@@ -344,11 +380,12 @@ so the agent will recieve a higher reward for being on a route square closer to 
 """
 def onRoute(state, route):
     if (state[0], state[1]) in route["Route"]:
-        return ((1 + route["Route"].index((state[0],state[1])))/SIZE)
+        return ((1 + route["Route"].index((state[0],state[1])))/len(route["Route"]))
     elif (state[0], state[1]) in route["Lane"]:
-        return ((1 + route["Lane"].index((state[0],state[1])))/(5 * SIZE))
+        return ((1 + route["Lane"].index((state[0],state[1])))/(5 * len(route["Route"])))
     else:
         return 0
+
 
 def notMoving(state, action):
     if state[2] == 0 and action[2] == 0:
@@ -363,7 +400,7 @@ def stopArea(state, action):
         elif state[2] == 0 and action[2] == 0:
             return 0
         else:
-            return -1
+            return -5
     else:
         return 0
 
@@ -375,6 +412,12 @@ def slowArea(state, action):
             return 0
     else:
         return 0
+    
+def collisionCheck(global_state):
+    if hasCollided(global_state):
+        return 1
+    else:
+        return 0
 
 """
 rewardFunction(state, action)
@@ -382,15 +425,29 @@ rewardFunction(state, action)
 This function takes the state and action of an agent and returns the reward produced by the environment. In our case, things like being on a goal square, 
 hitting an obstacle, and being on the route are important to the reward function. 
 """
-def rewardFunction(state, action):
+def rewardFunction(state, route, action, env, global_state=None):
+    """
+    This function takes the state, route, and action, and returns the reward produced by the environment.
+    """
     const1 = 1000   # Reward for reaching the goal
     const2 = 100    # Penalty for hitting an obstacle
-    const3 = 250     # Reward for being on the route
-    const4 = 0.5    # Penalty for accelerating or decelerating
-    const5 = 10      # Penalty for not moving
-    const6 = 200
-    const7 = 100
-    return(const1 * Goal(state) - const2 * Obs(state) + const3 * onRoute(state, routes['2']) - const4 * abs(action[2]) - const5 * notMoving(state, action) + const6 * stopArea(state, action) + const7 * slowArea(state, action))
+    const3 = 250    # Reward for being on the route
+    const4 = 5      # Penalty for accelerating or decelerating
+    const5 = 10     # Penalty for not moving
+    const6 = 100    # Penalty for collision
+
+    if global_state is None:
+        global_state = env.global_state
+
+    raw_reward = (
+        const1 * Goal(state, route) -
+        const2 * Obs(state) +
+        const3 * onRoute(state, route) -
+        const4 * abs(action[2]) -
+        const5 * notMoving(state, action) -
+        const6 * collisionCheck(global_state)
+    )
+    return raw_reward / 1000.0
   
 
 tp = {(c,r,s,d): {a: {} for a in legal_actions_cache[(c, r, s, d)]} 
@@ -425,11 +482,7 @@ for c, r, s, d, a in [
                 break
 
     # Assign main probability based on direction/speed match
-    if (c, r) in end_goal:
-        probs = {n: 1.0 if n == (c, r, s, d) else 0.0 for n in neighbors}
-        tp[(c, r, s, d)][a] = probs
-        continue
-    elif s == 0:
+    if s == 0:
         main_prob = 1.0
     elif correct_neighbor and d == correct_neighbor[3]:
         main_prob = 0.99 if a[2] == 0 else 0.95
@@ -453,6 +506,7 @@ for c, r, s, d, a in [
         # No correct neighbor (edge case) -> uniform distribution
         uniform_prob = 1.0 / len(neighbors)
         probs = {n: uniform_prob for n in neighbors}
+        print(f"Warning: No correct neighbor found for state {(c, r, s, d)} with action {a}. Using uniform distribution.")
 
     tp[(c, r, s, d)][a] = probs
 
@@ -469,6 +523,7 @@ class FlatGridWorld:
         self.n_squares = size * size
         self.obstacles = [Obs1, Obs2, Obs3]
         self.agents = agents
+        self.global_state = [agent.state for agent in agents]
 
     """
     render()
@@ -484,32 +539,32 @@ class FlatGridWorld:
         for coord in totObs:
             grid[coord] = -1
 
-        for coord in end_goal:
-            grid[coord] = 0.8
+        for agent in self.agents:
+            for coord in agent.route["End Goal"]:
+                grid[coord] = 0.8
 
-        for i in routes["2"]["Route"]:
-            grid[i] = 0.2
-        
+            for i in agent.route["Route"]:
+                grid[i] = 0.2
+
         speed_color_map = {
             0: 'green',
             1: 'yellow',
             2: 'red'
         }
 
-        for i in range(n_agents):
-            grid[(self.agents[i].state[0], self.agents[i].state[1])] = 1.0
-        
+        for agent in self.agents:
+            grid[(agent.state[0], agent.state[1])] = 1.0
 
-            dx, dy = dirToAction(self.agents[i].state[3])
-            arrow_color = speed_color_map.get(self.agents[i].state[2], 'black')
+            dx, dy = dirToAction(agent.state[3])
+            arrow_color = speed_color_map.get(agent.state[2], 'black')
 
-            plt.arrow(self.agents[i].state[0], self.agents[i].state[1], dx * self.agents[i].state[2], dy * self.agents[i].state[2],
-            head_width=0.5, head_length=0.5, fc=arrow_color, ec=arrow_color)
+            plt.arrow(agent.state[0], agent.state[1], dx * agent.state[2], dy * agent.state[2],
+                      head_width=0.5, head_length=0.5, fc=arrow_color, ec=arrow_color)
 
         plt.text(0.05, 0.05, f"Ticks: {t}", 
-         transform=plt.gca().transAxes,  # position relative to axes (0-1)
-         fontsize=10, color='black', 
-         verticalalignment='bottom', horizontalalignment='left')
+                 transform=plt.gca().transAxes,  # position relative to axes (0-1)
+                 fontsize=10, color='black', 
+                 verticalalignment='bottom', horizontalalignment='left')
 
         cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', (1,1,0,0.5), (1,0,0,0.5)])
         bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2, 2.5]
@@ -541,15 +596,20 @@ class FlatGridWorld:
         global t
         t += 1
 
-
+    def rebuildGlobalState(self):
+        """
+        Rebuilds the global state in a fixed order.
+        """
+        self.global_state = [agent.state for agent in sorted(self.agents, key=lambda ag: ag.agent_n)]
 """
 Agent
 
 The agent class holds the logic for q-learning, action fetching, and other methods like sampling which are important to the agent. 
 """
 class Agent:
-    def __init__(self, agent_n, start, state, phi, lamda, gamma_gain, gamma_loss, alpha, beta):
+    def __init__(self, agent_n, route, start, state, phi, lamda, gamma_gain, gamma_loss, alpha, beta, env):
         self.agent_n = agent_n
+        self.route = route
         self.start = start
         self.state = state
         self.phi = phi
@@ -558,51 +618,58 @@ class Agent:
         self.gamma_loss = gamma_loss
         self.alpha = alpha
         self.beta = beta
+        self.env = env
 
-
-        self.qtable = {(c,r,s,d): {} for c,r in product(range(SIZE), repeat = 2) for s in (0,1,2) for d in (1,2,3,4)}
-
-        for r,c in product(range(24), repeat = 2):
-            for s in (0,1,2):
-                for d in (1,2,3,4):
-                    for a in legal_actions_cache[(c,r,s,d)]:
-                        self.qtable[(c,r,s,d)][a] = 0
-
+        self.visits = {} # dict[(global_state, action)] -> int
+        self.qtable = {}
+        # Update Q-table to use global state and individual action as the key
+        """
+        self.qtable = {}
+        for global_state in product(
+            range(SIZE), repeat=2 * len(env.agents)
+        ):  # Global state includes all agents' positions
+            for action in legal_actions_cache[self.state]:
+                self.qtable[global_state] = {action: 0 for action in legal_actions_cache[self.state]}
+        """
         self.reset()
 
-    #Reset is called at the end of the initializing function to ensure the agents are at the right starting points
     def reset(self):
         self.state = self.start
         return self.state
-    
-    """
-    getQvalue(action)
 
-    getQvalue retrieves the qvalue for a state and action from the qtable. 
-    """
-    def getQValue(self, action):
+    def get_alpha(self, global_state, action):
+        state_key = tuple(global_state)
+        k = (state_key, action)
+        n_visits = self.visits.get(k, 0)
+        alpha = alpha0 / ((n_visits + 1) ** alpha_pow)
+
+        return alpha
+
+    def getQValue(self, global_state, action):
         """
-            Returns Q(state, action)
-            Note: need to make sure it returns zero if state is new
+        Returns Q(global_state, action)
         """
-        return self.qtable[self.state][action]
+        # Convert to tuple-of-tuples for dictionary key
+        state_key = tuple(global_state)
     
-    """
-    getAction(epsilon)
+        if state_key not in self.qtable:
+            return 0.0  # default Q-value for unseen state-action
+    
+        return self.qtable[state_key].get(action, 0.0)
 
-    The getAction method retrieves a chosen action based on the probability of exploring vs exploiting.
-    """
-    def getAction(self, epsilon):
-        action = None
-        if legal_actions_cache[self.state] == [0]:
-            return None
-
+    def getAction(self, global_state, epsilon):
+        """
+        Select an action for the agent based on the global state.
+        """
         explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
-        if explore == True:
-            action = random.choice(legal_actions_cache[self.state])
+        if explore:
+            legal_actions = legal_actions_cache.get(self.state, [])
+            if not legal_actions:
+                return None
+            return random.choice(legal_actions)
         else:
-            action = self.getPolicy()
-        return action
+            action = self.getPolicy(global_state)
+            return action
 
     """
     updateQ(action)
@@ -610,34 +677,76 @@ class Agent:
     updateQ performs the cpt-based q-value updating required for the agent to learn. It contains sampling, the rho-cpt function, and updating
     the q-value based on the learning rate before it updates the q-table. 
     """
-    def updateQ(self, action):
+    def updateQ(self, global_state, action):
+        state_key = tuple(global_state)
+        k = (state_key, action)
+
+        alpha = self.get_alpha(global_state, action)
+        self.visits[k] = self.visits.get(k, 0) + 1
+
         samples = self.sample_outcomes(action)
         target = self.rho_cpt(samples)
-        current_q = self.getQValue(action)
-        new_q = ((1 - lr) * current_q) + (lr * target)
-        self.qtable[self.state][action] = new_q 
+        current_q = self.getQValue(global_state, action)
+        new_q = ((1 - alpha) * current_q) + (alpha * target)
+
+        if state_key not in self.qtable:
+            self.qtable[state_key] = {}
+        self.qtable[state_key][action] = new_q 
 
 
-    """
-    sample_outcomes(action, n_samples)
 
-    Using the current state, passed action, and dictionary of transition probabilities,
-    compiles a list of samples for future Q-values to be modified using CPT and then used
-    in the updateQ function
-    """
     def sample_outcomes(self, action, n_samples=50):
+        """
+        Using the current state, passed action, and dictionary of transition probabilities,
+        compiles a list of samples for future Q-values to be modified using CPT and then used
+        in the updateQ function. This version also predicts other agents' next states.
+        """
         samples = []
         next_states = list(tp[self.state][action].keys())
         probs = list(tp[self.state][action].values())
-            
+
         for _ in range(n_samples):
+            # Sample the next state for the current agent
             s_prime = random.choices(next_states, weights=probs, k=1)[0]
-            reward = rewardFunction(s_prime, action)
-            v_s_prime = max(self.qtable[s_prime].values(), default = 0.0)
 
-            full_return = reward + (discount * v_s_prime) #+ random.gauss(0,1)
+            # Predict next states for other agents
+            predicted_global_state = []
+            for other_agent in self.env.agents:
+                if other_agent == self:
+                    predicted_global_state.append(s_prime)
+                else:
+                    other_actions = legal_actions_cache.get(other_agent.state, [])
+                    if not other_actions:
+                        predicted_global_state.append(other_agent.state)
+                        continue
+                    weights = [sum(tp[other_agent.state][a].values()) for a in other_actions]
+                    if sum(weights) == 0:
+                        other_action = random.choice(other_actions)  # fallback
+                    else:
+                        other_action = random.choices(other_actions, weights=weights, k=1)[0]
 
+                    if other_agent.state not in tp or other_action not in tp[other_agent.state]:
+                        other_s_prime = other_agent.state  # No transition available, stay in current state
+                    else:
+                        other_next_states = list(tp[other_agent.state][other_action].keys())
+                        other_probs = list(tp[other_agent.state][other_action].values())
+                        other_s_prime = random.choices(other_next_states, weights=other_probs, k=1)[0]
+                    predicted_global_state.append(other_s_prime)
+
+            # Calculate the reward for the current agent based on the predicted global state
+            reward = rewardFunction(s_prime, self.route, action, self.env, global_state=predicted_global_state)
+
+            # Get the maximum Q-value for the predicted global state
+            legal_actions = legal_actions_cache.get(s_prime, [])
+            if not legal_actions:
+                v_s_prime = 0.0
+            else:
+                v_s_prime = max(self.getQValue(predicted_global_state, a) for a in legal_actions)
+
+            # Compute the full return
+            full_return = reward + (discount * v_s_prime)
             samples.append(full_return)
+        
         return samples
 
 
@@ -662,8 +771,14 @@ class Agent:
             z_2 = (N_max - ii) / N_max
             z_3 = ii / N_max
             z_4 = (ii-1) / N_max
-            rho_plus = rho_plus + max(0, X_sort[ii])**self.alpha * (z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g))
-            rho_minus = rho_minus + (self.lamda * max(0, -X_sort[ii])**self.beta) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
+            rho_plus += max(0, X_sort[ii])**self.alpha * (
+                z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g)
+                - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g)
+            )
+            rho_minus += (self.lamda * max(0, -X_sort[ii])**self.beta) * (
+                z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l)
+                - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l)
+            )
         rho = rho_plus - rho_minus
 
         return rho
@@ -674,13 +789,17 @@ class Agent:
     Compute best action to take in a state. Will need to add 
     belief distribution for multi-agent CPT
     """
-    def getPolicy(self):
+    def getPolicy(self, global_state):
+        legal_actions = legal_actions_cache.get(self.state, [])
+
+        if not legal_actions:
+            return None
 
         best_value = -float('inf')
         best_actions = []
 
-        for action in legal_actions_cache[self.state]:
-            value = self.getQValue(action)
+        for action in legal_actions:
+            value = self.getQValue(global_state, action)
             if value > best_value:
                 best_value = value
                 best_actions = [action]
