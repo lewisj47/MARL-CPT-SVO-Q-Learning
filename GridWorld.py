@@ -124,7 +124,7 @@ def main():
             #Show the visualization
             plt.ion()                                   #Activate interactive mode
             plt.show()                                  #Show visualization
-            plt.pause(0.001)                           #Pause between episodes in seconds
+            plt.pause(0.0001)                           #Pause between episodes in seconds
 
             all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)
 
@@ -135,9 +135,10 @@ def main():
 
             if hasCollided(env.global_state) == 1:
                 tqdm.write("Collision detected, stopping episode.")
+                t = 0
                 break
 
-            if all_finished or hasCollided(env.global_state):
+            if all_finished:
                 t = 0
                 break
 
@@ -150,7 +151,7 @@ def main():
 """
 runTest()
 
-This function will run the agent for a few episodes with no learning, no exploration, and no transition probability.
+This function will run the agent for a few episodes with no learning and no exploration.
 """
 def runTest(iter_n, env):
 
@@ -175,7 +176,7 @@ def runTest(iter_n, env):
                 if action is None:
                     continue
                 
-                total_rewards[agent.agent_n - 1] += rewardFunction(agent.state, agent.route, action, env) #Get the reward for agent i
+                total_rewards[agent.agent_n - 1] += rewardFunction(agent.state, agent.route, action, env.global_state) #Get the reward for agent i
 
                 agent.updateQ(env.global_state, action)                   #Update q-value for agent i having taken action at state
 
@@ -188,7 +189,7 @@ def runTest(iter_n, env):
             #Show the visualization
             plt.ion()                                   #Activate interactive mode
             plt.show()                                  #Show visualization
-            plt.pause(0.01)                           #Pause between episodes in seconds
+            plt.pause(0.0001)                           #Pause between episodes in seconds
 
             if hasCollided(env.global_state) == 1:
                 tqdm.write("Collision detected, stopping episode.")
@@ -201,8 +202,8 @@ def runTest(iter_n, env):
                 t = 0
                 break
 
-    trange_desc = f"Collisions: {collision_num}"
-    trange.set_description(trange_desc)  # dynamic description
+    for i in trange(num_episodes, desc=f"Collisions: {collision_num}"):
+        plt.pause(0.0001)
 
     print(f"Total number of collisions: {collision_num}")
     print(f"Total rewards for each agent: {total_rewards}")
@@ -238,22 +239,15 @@ def hasCollided(global_state):
                 positions.remove(pos)
     
     for state in global_state:
-        for r, path in routes.items():
-            pos = (state[0], state[1])
-            if pos in path:
-                idx = path.index(pos)
-                if idx + 1 < len(path):
-                    next_tile = path[idx + 1]
-                    for s in global_state:
-                        if s[0] == next_tile[0] and s[1] == next_tile[1]:
-                            third_entry = s[2]
-                            break
-                    if state[2] == 2 and next_tile in [(s[0], s[1]) for s in global_state] and third_entry == 2:
-                        print("Edge case")
+        for r, route in routes.items():
+            print(r)
+            if (state[0], state[1]) in route["Route"]:
+                idx = route["Route"].index((state[0], state[1]))
+                if idx + 1 < len(route["Route"]):
+                    if (state[2] == 2 and any((route["Route"][idx + 1][0], route["Route"][idx + 1][1], s) in global_state for s in (0,1))):
                         return 1
-
+            
     if len(positions) != len(set(positions)):
-        print("regular")
         return 1
     else:
         return 0
@@ -356,15 +350,15 @@ rewardFunction(state, action)
 This function takes the state and action of an agent and returns the reward produced by the environment. In our case, things like being on a goal square, 
 hitting an obstacle, and being on the route are important to the reward function. 
 """
-def rewardFunction(state, route, action, env):
+def rewardFunction(state, route, action, global_state):
     const1 = 2000   # Reward for reaching the goal
     const2 = 600
-    const4 = 50    # Penalty for accelerating or decelerating
-    const5 = 50     # Penalty for not moving
-    const6 = 1000
+    const4 = 0    # Penalty for accelerating or decelerating
+    const5 = 0     # Penalty for not moving
+    const6 = 0
     return(const1 * Goal(state, route) - 
            const4 * abs(action) - 
-           const2 * hasCollided(env.global_state) -
+           const2 * hasCollided(global_state) -
            const5 * notMoving(state, action) + 
            const6 * stopArea(state, action) + 
            const6 * slowArea(state, action))
@@ -429,9 +423,6 @@ class FlatGridWorld:
         for agent in self.agents:
             for coord in agent.route["End Goal"]:
                 grid[coord] = 0.8
-
-            for coord in agent.route["Route"]:
-                grid[coord] = 0.2
 
         for i in range(n_agents):
             if ((self.agents[i].state[0], self.agents[i].state[1])) not in allGoals:
@@ -578,6 +569,7 @@ class Agent:
         for key, value in routes.items():
             if value is self.route:
                 route_num = key
+
         next_states = list(tp[route_num][self.state][action].keys())
         probs = list(tp[route_num][self.state][action].values())
             
@@ -609,7 +601,7 @@ class Agent:
                         other_s_prime = random.choices(other_next_states, weights=otherprobs, k=1)[0]
                     predicted_global_state.append(other_s_prime)
             
-            reward = rewardFunction(s_prime, self.route, action, self.env)
+            reward = rewardFunction(s_prime, self.route, action, predicted_global_state)
 
             legal_actions = getLegalActions(s_prime)
             if not legal_actions:
@@ -681,4 +673,4 @@ main()
 
 lr = 0
 
-runTest(25, env)
+runTest(200, env)
