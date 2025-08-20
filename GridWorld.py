@@ -139,13 +139,13 @@ def main():
             #Show the visualization
             plt.ion()                                   #Activate interactive mode
             plt.show()                                  #Show visualization
-            plt.pause(0.001)                           #Pause between episodes in seconds
+            plt.pause(0.0001)                           #Pause between episodes in seconds
 
             all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)
 
-
             if hasCollided(env.global_state):
                 tqdm.write(f"Episode {i + 1}: Collision detected.")
+
                 t = 0
                 break
 
@@ -165,7 +165,7 @@ def main():
     for agent in agents:
         with open(f"qtable_output{agent.agent_n}.txt", "w") as f:
             pprint.pprint(agent.qtable, stream=f)
-
+            
 
 """
 Goal(state):
@@ -199,14 +199,15 @@ def hasCollided(global_state):
                 positions.remove(pos)
     
     for state in global_state:
-        for rid, route in routes.items():
+
+        for r, route in routes.items():
+            print(r)
             if (state[0], state[1]) in route["Route"]:
                 idx = route["Route"].index((state[0], state[1]))
                 if idx + 1 < len(route["Route"]):
-                    if (state[2] == 2 and any((route["Route"][idx + 1][0],
-                        route["Route"][idx + 1][1], s) in global_state for s in (0,1))):
+                    if (state[2] == 2 and any((route["Route"][idx + 1][0], route["Route"][idx + 1][1], s) in global_state for s in (0,1))):
                         return 1
-
+            
     if len(positions) != len(set(positions)):
         return 1
     else:
@@ -311,12 +312,10 @@ rewardFunction(state, action)
 This function takes the state and action of an agent and returns the reward produced by the environment. In our case, things like being on a goal square, 
 hitting an obstacle, and being on the route are important to the reward function. 
 """
+
 def rewardFunction(state, route, action, env, global_state=None):
     const1 = 20   # Reward for reaching the goal
     const2 = 10
-    const4 = 50    # Penalty for accelerating or decelerating
-    const5 = 50     # Penalty for not moving
-    const6 = 1000
 
     if global_state is None:
         global_state = env.global_state
@@ -386,9 +385,6 @@ class FlatGridWorld:
         for agent in self.agents:
             for coord in agent.route["End Goal"]:
                 grid[coord] = 0.8
-
-            for coord in agent.route["Route"]:
-                grid[coord] = 0.2
 
         for i in range(n_agents):
             if ((self.agents[i].state[0], self.agents[i].state[1])) not in allGoals:
@@ -548,6 +544,7 @@ class Agent:
                 route_num = key
                 break
 
+
         next_states = list(tp[route_num][self.state][action].keys())
         probs = list(tp[route_num][self.state][action].values())
             
@@ -589,6 +586,7 @@ class Agent:
                 predicted_global_state.append(other_s_prime)
             
             reward = rewardFunction(s_prime, self.route, action, self.env, global_state=predicted_global_state)
+
 
             legal_actions = getLegalActions(s_prime)
             if not legal_actions:
