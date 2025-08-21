@@ -105,9 +105,13 @@ def main():
     #List containing all agent objects
     # Timid agent: lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, beta, alpha = 0.88
     # Expectation agent: lamda = 1, gamma_gain = 1, gamma_loss = 1, beta, alpha = 1
+    # Purely Altruistic: phi = pi/2
+    # Mid Altruistic: phi = pi/4
+    # Purely Egoistic: phi = 0
     global agents
-    agents = [Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
-              Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)]
+
+    agents = [Agent(agent_n = 1, route = routes['2'], phi = (math.pi / 3), lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+              Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)]
     
     env.agents = agents
 
@@ -135,7 +139,7 @@ def main():
 
                 s_prime = env.updateWorld(agent, action)
                 predicted_global_state = [a.state for a in env.agents]
-                tot_reward[agent.agent_n - 1] += rewardFunction(s_prime, agent.route, action, env, global_state=predicted_global_state)
+                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
 
 
             env.rebuildGlobalState()          
@@ -368,14 +372,89 @@ def stopArea(state, action):
         return 0
 
 def slowArea(state, action):
-    x,y,s = state
-    if (x,y) in slow_region:
+    x, y, s = state
+    if (x, y) in slow_region:
         if s == 1 and action == -1:
             return 3
         else:
             return -1
     else:
         return 0
+    
+def proximityCheck(agent, state, global_state):
+    route = agent.route["Route"]
+    x, y, _ = state
+    for idx, entry in enumerate(route):
+        if entry == (x, y):
+            adj_one = route[idx + 1] if idx + 1 < len(route) else None
+            adj_two = route[idx + 2] if idx + 2 < len(route) else None
+            break
+
+    found = False
+    penalty = 0
+    for s in global_state:
+        x, y, _ = s
+        if not found and s == state:
+            found = True
+            continue
+        if (x, y) == adj_one:
+            penalty = max(penalty, 1)
+        elif (x, y) == adj_two:
+            penalty = max(penalty, 0.25)
+    
+    return penalty 
+
+def bubbleCheck(agent, state, global_state):
+    if Goal(state, agent.route):
+        return 0
+    x, y, _ = state
+    bubble_1 = [(x+i, y+j, s) for i in range(-1, 2) 
+                          for j in range(-1, 2) 
+                          for s in (0, 1, 2)]
+
+    bubble_2 = [(x+i, y+j, s) for i in range(-2, 3) 
+                          for j in range(-2, 3) 
+                          for s in (0, 1, 2)]    
+
+    found = False
+    penalty = 0
+    for other_state in global_state:
+        if not found and other_state == state:
+            found = True
+            continue
+        if other_state in bubble_2 and not Goal(other_state, agent.route):
+            if other_state in bubble_1:
+                penalty += 1
+            else:
+                penalty += 0.5
+    
+    return penalty
+
+def collisionCheck(agent, global_state):
+
+    agent_state = agent.state
+    agent_pos = (agent_state[0], agent_state[1])
+    agent_speed = agent_state[2]
+    route = agent.route["Route"]
+
+    if agent_pos in agent.route["End Goal"]:
+        return 0
+    
+    other_states = [s for s in global_state if s != agent_state]
+
+    if agent_pos in [(s[0], s[1]) for s in other_states]:
+        return 1
+
+    if agent_pos in route:
+        idx = route.index(agent_pos)
+        if idx + 1 < len(route):
+            next_pos = route[idx + 1]
+            for s in other_states:
+                if (s[0], s[1]) == next_pos and agent_speed == 2 and s[2] in (0, 1):
+                    return 1
+                
+    return 0
+
 
 """
 rewardFunction(state, action)
@@ -384,20 +463,28 @@ This function takes the state and action of an agent and returns the reward prod
 hitting an obstacle, and being on the route are important to the reward function. 
 """
 
-def rewardFunction(state, route, action, env, global_state=None):
+
+def rewardFunction(agent, state, action, global_state):
     global t
+    route = agent.route
+    const1 = 10     # Reward for reaching the goal
+    const2 = 10     # Penalty for colliding with another agent
+    const3 = 0.01   # Penalty per move
+    const4 = 0.5    # Penalty for tailing another agent
+    const5 = 0.1    # Penalty for being within 2 squares of another agent
+    const6 = 15     # Reward for stopping at the stop sign
+    const7 = 5      # Reward for slowing before the stop sign 
+    const8 = 1      # Penalty for not moving
+    
+    return(const1 * Goal(state, route) 
+      - const2 * collisionCheck(agent, global_state) 
+      - const3 * t 
+      - const4 * proximityCheck(agent, state, global_state) 
+      - const5 * bubbleCheck(agent, state, global_state))
+      + const6 * stopArea(state, action) 
+      + const7 * slowArea(state, action) 
+      - const8 * notMoving(state, action))
 
-    const1 = 25   # Reward for reaching the goal
-    const2 = 25   # Penalty for collision
-    const3 = 15   #Reward for stopping at the stop sign
-    const4 = 5    #Reward for slowing before the stop sign 
-    const5 = 0.2  #Time penalty
-    const6 = 1    #Penalty for not moving
-
-    if global_state is None:
-        global_state = env.global_state
-
-    return(const1 * Goal(state, route) - const2 * hasCollided(global_state) + const3 * stopArea(state, action) + const4 * slowArea(state, action) - const5 * t - const6 * notMoving(state, action))
 
 # Precompute for speed
 route_idx = {rid: {pos: i for i, pos in enumerate(info["Route"])}
@@ -535,13 +622,6 @@ class Agent:
 
         self.qtable = {}
 
-        """
-        coord = product(allStates, repeat=n_agents)
-        for combo in coord:
-            self.qtable[combo] = {}
-            for a in (-1,0,1):
-                self.qtable[combo][a] = 0
-        """
 
         self.reset()
 
@@ -580,6 +660,9 @@ class Agent:
             return random.choice(legal_actions)
         else:
             action = self.getPolicy(global_state)
+            #legal_actions = getLegalActions(self.state)
+            #print(f"[DEBUG] Agent {self.agent_n} | Current state: {self.state} | Legal actions: {legal_actions} | Chosen action: {action}")
+
             return action
 
     """
@@ -597,7 +680,8 @@ class Agent:
         state_key = tuple(global_state)
         if state_key not in self.qtable:
             self.qtable[state_key] = {}
-        self.qtable[state_key][action] = new_q 
+        self.qtable[state_key][action] = new_q
+
 
 
     """
@@ -626,50 +710,56 @@ class Agent:
             
         for _ in range(n_samples):
             # Sample the next state for the current agent
-            s_prime = random.choices(next_states, weights=probs, k=1)[0]
             predicted_global_state = []
+            other_actions_taken = {}
             
             for other_agent in self.env.agents:
                 if other_agent == self:
+                    s_prime = random.choices(next_states, weights=probs, k=1)[0]
                     predicted_global_state.append(s_prime)
-                    continue
-
-                other_rid = None
-                for key, value in routes.items():
-                    if value is other_agent.route:
-                        other_rid = key
-                        break
-
-                other_actions = getLegalActions(other_agent.state, other_agent.route)
-                if not other_actions:
-                    predicted_global_state.append(other_agent.state)
-                    continue
-                
-                weights = [sum(tp[other_rid][other_agent.state][a].values()) for a in other_actions]
-                if sum(weights) == 0:
-                    predicted_global_state.append(other_agent.state)
-                    continue
                 else:
-                    other_action = random.choices(other_actions, weights=weights, k=1)[0]
+                    other_rid = None
+                    for key, value in routes.items():
+                        if value is other_agent.route:
+                            other_rid = key
+                            break
+                    other_actions = getLegalActions(other_agent.state, other_agent.route)
+                    if not other_actions:
+                        other_s_prime = other_agent.state
+                        other_action = None
+                    else:
+                        other_action = random.choice(other_actions)
+                        if (other_agent.state not in tp[other_rid] or other_action not in tp[other_rid][other_agent.state] or not tp[other_rid][other_agent.state][other_action]):
+                            other_s_prime = other_agent.state
+                        else:
+                            other_next_states = list(tp[other_rid][other_agent.state][other_action].keys())
+                            other_probs = list(tp[other_rid][other_agent.state][other_action].values())                    
+                            other_s_prime = random.choices(other_next_states, weights=other_probs, k=1)[0]
                 
-                if (other_agent.state not in tp[other_rid] or other_action not in tp[other_rid][other_agent.state]):
-                    other_s_prime = other_agent.state
-                else:
-                    other_next_states = list(tp[other_rid][other_agent.state][other_action].keys())
-                    other_probs = list(tp[other_rid][other_agent.state][other_action].values())
-                    other_s_prime = random.choices(other_next_states, weights=other_probs, k=1)[0]
-                
-                predicted_global_state.append(other_s_prime)
+                    predicted_global_state.append(other_s_prime)
+                    other_actions_taken[other_agent] = other_action
+
             
-            reward = rewardFunction(s_prime, self.route, action, self.env, global_state=predicted_global_state)
+            self_reward = rewardFunction(self, predicted_global_state[self.agent_n - 1], action, predicted_global_state)
+
+            other_rewards = 0.0
+            for other_agent in self.env.agents:
+                if other_agent == self:
+                    continue
+                r = rewardFunction(other_agent, predicted_global_state[other_agent.agent_n - 1], other_actions_taken[other_agent], predicted_global_state)
+                other_rewards += r
+            
+            avg_other_reward = other_rewards / (len(self.env.agents) - 1)
+            weighted_joint_reward = math.cos(self.phi) * self_reward + math.sin(self.phi) * avg_other_reward
 
             legal_actions = getLegalActions(s_prime, self.route)
+
             if not legal_actions:
                 v_s_prime = 0.0
             else:
                 v_s_prime = max(self.getQValue(predicted_global_state, a) for a in legal_actions)
             
-            full_return = reward + (discount * v_s_prime)
+            full_return = weighted_joint_reward + (discount * v_s_prime)
             samples.append(full_return)
         
         return samples

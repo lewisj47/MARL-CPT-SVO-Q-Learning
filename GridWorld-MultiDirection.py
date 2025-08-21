@@ -19,10 +19,10 @@ end_goal_1 = []
 end_goal_2 = []
 
 #End goal at the top
-end_goal_1.extend([(c, r) for c in range(12, 15) for r in range(23, 24)])
+end_goal_1.extend([(c, r) for c in range(12, 15) for r in range(22, 24)])
 
 #End goal on the right
-end_goal_2.extend([(c,r) for c in range(22, 24) for r in range(9, 12)])
+end_goal_2.extend([(c, r) for c in range(22, 24) for r in range(9, 12)])
 
 #Routes are used in the reward function to reward the agent for making progress towards the goal
 routes = {}
