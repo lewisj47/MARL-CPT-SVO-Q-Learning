@@ -16,8 +16,9 @@ parser.add_argument("testepisodes", type=int, help="The number of episodes to un
 args = parser.parse_args()
 
 start_state_1 = (13, 3, 1)
-start_state_2 = (13, 0, 1)
+start_state_2 = (13, 8, 0)
 start_state_3 = (0, 10, 2)
+start_state_4 = (6, 10, 2)
 
 #End Goals
 end_goal_1 = []
@@ -32,9 +33,11 @@ route_1 = [(13, r) for r in range(3, 24)]
 route_2 = [(13, r) for r in range (0, 11)]
 route_2.extend([(c, 10) for c in range(14, 24)])
 
-turn_2 = [(13, 7), (13, 8), (13, 9), (13,10), (14, 10), (15, 10), (16, 10)]
+turn_2 = [(13, 8), (13, 9), (13,10), (14, 10), (15, 10)]
 
-route_3 = [(c, 10) for c in range (0,24)]
+route_3 = [(c, 10) for c in range(0, 24)]
+
+route_4 = [(c, 10) for c in range(4, 24)]
 
 #Route 1: straight up
 routes["1"] = {"Route": route_1, "End Goal": end_goal_1, "Start State": start_state_1}
@@ -44,6 +47,9 @@ routes["2"] = {"Route": route_2, "End Goal": end_goal_2, "Start State": start_st
 
 #Route 3: straight right
 routes["3"] = {"Route": route_3, "End Goal": end_goal_2, "Start State": start_state_3}
+
+#Route 3: straight right later later starting position
+routes["4"] = {"Route": route_4, "End Goal": end_goal_2, "Start State": start_state_4}
 
 allRoutes = route_1 + route_2 + route_3
 allGoals = end_goal_1 + end_goal_2
@@ -81,9 +87,7 @@ decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsil
 #Global Variables
 t = 0           #T used to measure the number of ticks in a single episode
 lr = 0.2
-n_agents = 0
-
-
+n_agents = 2
 
 def main():
   
@@ -97,8 +101,7 @@ def main():
 
     #Environment object that is updated and rendered
     env = FlatGridWorld(size=SIZE, agents=[])
-
-
+    
     #List containing all agent objects
     # Timid agent: lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, beta, alpha = 0.88
     # Expectation agent: lamda = 1, gamma_gain = 1, gamma_loss = 1, beta, alpha = 1
@@ -108,7 +111,8 @@ def main():
     global agents
 
     agents = [Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
-              Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+              #Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
+              Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
               ]
     
     env.agents = agents
@@ -121,6 +125,11 @@ def main():
 
     #Initializing global state
     env.rebuildGlobalState()
+
+    #Running windows for policy stabiliy and q-deltas
+    entropy_window = np.zeros((n_agents, 100))
+    qdelta_window = np.zeros((n_agents, 100))
+    reward_window = np.zeros((n_agents, 100))
 
     tot_reward = np.zeros(n_agents)
     window_index = 0
@@ -146,16 +155,18 @@ def main():
                 collisions = 0
             lr = 0
             epsilon = 0
-
-
+        
+ 
         while True:
             for agent in agents:
+                
                 if ((agent.state[0], agent.state[1]) in agent.route["End Goal"]):
                     continue
+
                 action = agent.getAction(env.global_state, epsilon)       #Get an action for agent i
                 if action is None:
                     continue
-                
+
                 delta = agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
                 qdelta_ep[agent.agent_n - 1] += delta
                 counts[agent.agent_n - 1] += 1
@@ -170,14 +181,15 @@ def main():
 
             env.rebuildGlobalState()          
 
-            env.render()                                #Render in visualization
+            if i > num_episodes:
+                env.render()                                #Render in visualization
+                #Show the visualization
+                plt.ion()                                   #Activate interactive mode
+                plt.show()                                  #Show visualization
+                plt.pause(0.2)                           #Pause between episodes in seconds
 
-            #Show the visualization
-            plt.ion()                                   #Activate interactive mode
-            plt.show()                                  #Show visualization
-            plt.pause(0.1)                           #Pause between episodes in seconds
 
-            all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)
+            all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)      
 
             if hasCollided(env.global_state):
                 collisions += 1
@@ -187,6 +199,7 @@ def main():
             if all_finished:
                 t = 0
                 break
+                
         if i < num_episodes:
             epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
 
@@ -207,12 +220,21 @@ def main():
             avg_entropy = entropy_window.mean(axis=1)
             avg_qdelta = qdelta_window.mean(axis=1)
             tqdm.write(f"Episode {i + 1}:")
-            
+
+            """
+            for agent in agents:
+                for coord in agent.route["Route"]:
+                    if coord in stop_region:
+                        tqdm.write(f"Agent {agent.agent_n} stopped at stop sign {stop_counter[agent.agent_n - 1]}% of the time")
+            """
+
+            stop_counter = [0] * n_agents
+
             for idx in range(n_agents):
                 arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
                 arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
                 arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
-                
+
                 tqdm.write(
                     f"Agent {idx+1} | "
                     f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
@@ -322,6 +344,9 @@ def neighboringStates(state, route):
                     next_r, next_c = route_list[next_idx]
                     valid.append((next_r, next_c, s))
 
+    if "Turn" in route and (state[0], state[1]) in route["Turn"]:
+        valid = [v for v in valid if v[2] != 2]
+
     # Filter valid states: must be on the route
     route_coords = set(route_list)
     valid = [i for i in valid if (i[0], i[1]) in route_coords]
@@ -365,11 +390,11 @@ def stopArea(state, action):
     x, y, s = state
     if (x, y) in stop_region:
         if s == 0 and action == 1:
-            return 1
+            return 2
         elif s == 0 and action == 0: 
-            return 0.1
+            return 0.2
         else:
-            return -1
+            return 0
     else:
         return 0
 
@@ -467,8 +492,8 @@ def rewardFunction(agent, state, action, global_state, log = False):
     const3 = 0.05   # Penalty per move
     const4 = 2      # Penalty for tailing another agent
     const5 = 0.5    # Penalty for being within 2 squares of another agent
-    const6 = 15     # Reward for stopping at the stop sign
-    const7 = 5      # Reward for slowing before the stop sign 
+    const6 = 0     # Reward for stopping at the stop sign
+    const7 = 0      # Reward for slowing before the stop sign 
     const8 = 0.5    # Penalty for not moving
 
 
@@ -523,19 +548,23 @@ for rid, info in routes.items():
                 if not candidates:
                     continue
                 if action == 0: 
+
                     p_intended = 0.99
                 else:
                     p_intended = 0.90
                 
                 n_cand = len(candidates)
+
                 p_other = (1.0 - p_intended) / max(1, n_cand - 1)
                     
                 for (nx, ny, ns) in candidates:
+
                     # Intended position is progress along the route by 's'
                     intended_pos_ok = (i + s < len(rlist) and (nx, ny) == rlist[i + s])
                     # Intended speed is s + action
                     intended_speed_ok = (ns == s + action)
                     is_intended = intended_pos_ok and intended_speed_ok
+                    
                     tp[rid][(x, y, s)][action][(nx, ny, ns)] = p_intended if is_intended else p_other
 
 """
