@@ -9,6 +9,7 @@ import random
 import pprint
 import math
 from tqdm import tqdm
+from colorama import Fore, Style
 
 parser = argparse.ArgumentParser()
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
@@ -102,6 +103,10 @@ def main():
     #Environment object that is updated and rendered
     env = FlatGridWorld(size=SIZE, agents=[], obstacles=(Obs1,Obs2,Obs3))
 
+    #Running windows for policy stabiliy and q-deltas
+    entropy_window = np.zeros((n_agents, 100))
+    qdelta_window = np.zeros((n_agents, 100))
+
     #List containing all agent objects
     # Timid agent: lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, beta, alpha = 0.88
     # Expectation agent: lamda = 1, gamma_gain = 1, gamma_loss = 1, beta, alpha = 1
@@ -122,11 +127,19 @@ def main():
     reward_window = np.zeros((n_agents, 100))
     window_index = 0
 
+    prev_rewards = [None] * n_agents
+    prev_entropy = [None] * n_agents
+    prev_qdelta  = [None] * n_agents
+
     for i in tqdm(range(num_episodes)):
         tot_reward[:] = 0
         for agent in agents:
             agent.reset()                               #Reset agent states
         
+        entropy_ep = np.zeros(n_agents)
+        qdelta_ep = np.zeros(n_agents)
+        counts = np.zeros(n_agents)
+
         while True:
             for agent in agents:
                 if ((agent.state[0], agent.state[1]) in agent.route["End Goal"]):
@@ -134,13 +147,19 @@ def main():
                 action = agent.getAction(env.global_state, epsilon)       #Get an action for agent i
                 if action is None:
                     continue
+                
+                delta = agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
+                qdelta_ep[agent.agent_n - 1] += delta
+                counts[agent.agent_n - 1] += 1
 
                 agent.updateQ(env.global_state, action)                   #Update q-value for agent i having taken action at state
 
                 s_prime = env.updateWorld(agent, action)
                 predicted_global_state = [a.state for a in env.agents]
+
                 tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
 
+                entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
 
             env.rebuildGlobalState()          
 
@@ -164,13 +183,38 @@ def main():
                 break
 
         epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
+
+        for idx in range(n_agents):
+            if counts[idx] > 0:
+                avg_entropy = entropy_ep[idx] / counts[idx]
+                avg_qdelta = qdelta_ep[idx] / counts[idx]
+            else:
+                avg_entropy, avg_qdelta = 0, 0
+
+            entropy_window[idx, window_index] = avg_entropy
+            qdelta_window[idx, window_index] = avg_qdelta
+
         reward_window[:, window_index] = tot_reward
         window_index = (window_index + 1) % 100
         if ((i + 1) % 100) == 0:
             avg_rewards = reward_window.mean(axis=1)
+            avg_entropy = entropy_window.mean(axis=1)
+            avg_qdelta = qdelta_window.mean(axis=1)
             tqdm.write(f"Episode {i + 1}:")
-            for idx, avg in enumerate(avg_rewards, start=1):
-                tqdm.write(f"Agent {idx} average reward over last 100 episodes: {avg:.2f}")
+            for idx in range(n_agents):
+                arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
+                arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
+                arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
+                
+                tqdm.write(
+                    f"Agent {idx+1} | "
+                    f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
+                    f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
+                    f"ΔQ={avg_qdelta[idx]:.4f}{arrow_q}"
+                )
+                prev_rewards[idx] = avg_rewards[idx]
+                prev_entropy[idx] = avg_entropy[idx]
+                prev_qdelta[idx]  = avg_qdelta[idx]
 
     print(f"Agents collided {collisions} times in {i + 1} episodes.")
     for agent in agents:
@@ -197,7 +241,7 @@ def main():
 
                 s_prime = env.updateWorld(agent, action)
                 predicted_global_state = [a.state for a in env.agents]
-                tot_reward[agent.agent_n - 1] += rewardFunction(s_prime, agent.route, action, env, global_state=predicted_global_state)
+                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
 
 
             env.rebuildGlobalState()          
@@ -213,8 +257,6 @@ def main():
 
             if hasCollided(env.global_state):
                 collisions += 1
-                tqdm.write(f"Episode {i + 1}: Collision detected.")
-
                 t = 0
                 break
 
@@ -236,6 +278,33 @@ def main():
         with open(f"qtable_output{agent.agent_n}.txt", "w") as f:
             pprint.pprint(agent.qtable, stream=f)
             
+
+def trend_arrow(current, previous, higher_is_better=True):
+    if previous is None:
+        return ""  # no arrow for first measurement
+    if current > previous:
+        return Fore.GREEN + "↑" + Style.RESET_ALL if higher_is_better else Fore.RED + "↑" + Style.RESET_ALL
+    elif current < previous:
+        return Fore.RED + "↓" + Style.RESET_ALL if higher_is_better else Fore.GREEN + "↓" + Style.RESET_ALL
+    else:
+        return Fore.YELLOW + "→" + Style.RESET_ALL
+
+def policy_entropy(agent, global_state, epsilon):
+    q_values = [agent.getQValue(global_state, a) for a in getLegalActions(agent.state, agent.route)]
+    if not q_values:
+        return 0.0
+
+    n_actions = len(q_values)
+    best = max(q_values)
+    probs = []
+    for q in q_values:
+        if q == best:
+            probs.append((1 - epsilon) + epsilon / n_actions)
+        else:
+            probs.append(epsilon / n_actions)
+
+    return -sum(p * math.log(p + 1e-12) for p in probs)
+
 
 """
 Goal(state):
@@ -335,13 +404,14 @@ def getLegalActions(state, route):
     legal_actions = []
     
     if "Turn" in route:
-        if state in route["Turn"]:
+        x,y,s = state
+        if (x,y) in route["Turn"]:
             if s == 0:
-                legal_actions = [0,1]
+                return([0,1])
             if s == 1:
-                legal_actions = [-1,0]
+                return([-1,0])
             if s == 2:
-                legal_actions = [-1]
+                return[-1]
     if s == 0:
         legal_actions = [0,1]
     
@@ -375,7 +445,7 @@ def slowArea(state, action):
     x, y, s = state
     if (x, y) in slow_region:
         if s == 1 and action == -1:
-            return 3
+            return 1
         else:
             return -1
     else:
@@ -467,20 +537,21 @@ hitting an obstacle, and being on the route are important to the reward function
 def rewardFunction(agent, state, action, global_state):
     global t
     route = agent.route
-    const1 = 10     # Reward for reaching the goal
-    const2 = 10     # Penalty for colliding with another agent
-    const3 = 0.01   # Penalty per move
-    const4 = 0.5    # Penalty for tailing another agent
-    const5 = 0.1    # Penalty for being within 2 squares of another agent
+
+    const1 = 30     # Reward for reaching the goal
+    const2 = 25     # Penalty for colliding with another agent
+    const3 = 0.025   # Penalty per move
+    const4 = 2    # Penalty for tailing another agent
+    const5 = 0.5    # Penalty for being within 2 squares of another agent
     const6 = 15     # Reward for stopping at the stop sign
     const7 = 5      # Reward for slowing before the stop sign 
-    const8 = 1      # Penalty for not moving
+    const8 = 0.5     # Penalty for not moving
     
     return(const1 * Goal(state, route) 
       - const2 * collisionCheck(agent, global_state) 
       - const3 * t 
       - const4 * proximityCheck(agent, state, global_state) 
-      - const5 * bubbleCheck(agent, state, global_state))
+      - const5 * bubbleCheck(agent, state, global_state)
       + const6 * stopArea(state, action) 
       + const7 * slowArea(state, action) 
       - const8 * notMoving(state, action))
@@ -677,10 +748,14 @@ class Agent:
         current_q = self.getQValue(global_state, action)
         new_q = ((1 - lr) * current_q) + (lr * target)
 
+        delta = new_q - current_q
+
         state_key = tuple(global_state)
         if state_key not in self.qtable:
             self.qtable[state_key] = {}
         self.qtable[state_key][action] = new_q
+
+        return delta
 
 
 
