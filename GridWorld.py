@@ -98,10 +98,6 @@ def main():
     #Environment object that is updated and rendered
     env = FlatGridWorld(size=SIZE, agents=[])
 
-    #Running windows for policy stabiliy and q-deltas
-    entropy_window = np.zeros((n_agents, 100))
-    qdelta_window = np.zeros((n_agents, 100))
-    reward_window = np.zeros((n_agents, 100))
 
     #List containing all agent objects
     # Timid agent: lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, beta, alpha = 0.88
@@ -117,6 +113,12 @@ def main():
     
     env.agents = agents
     n_agents = len(agents)
+
+    #Running windows for policy stabiliy and q-deltas
+    entropy_window = np.zeros((n_agents, 100))
+    qdelta_window = np.zeros((n_agents, 100))
+    reward_window = np.zeros((n_agents, 100))
+
     #Initializing global state
     env.rebuildGlobalState()
 
@@ -131,7 +133,9 @@ def main():
         tot_reward[:] = 0
         for agent in agents:
             agent.reset()                               #Reset agent states
-            
+        
+        env.rebuildGlobalState()
+
         entropy_ep = np.zeros(n_agents)
         qdelta_ep = np.zeros(n_agents)
         counts = np.zeros(n_agents)
@@ -156,13 +160,11 @@ def main():
                 qdelta_ep[agent.agent_n - 1] += delta
                 counts[agent.agent_n - 1] += 1
 
-                agent.updateQ(env.global_state, action)                   #Update q-value for agent i having taken action at state
-
                 s_prime = env.updateWorld(agent, action)
 
                 predicted_global_state = [a.state for a in sorted(env.agents, key=lambda ag: ag.agent_n)]
 
-                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
+                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
 
                 entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
 
@@ -173,7 +175,7 @@ def main():
             #Show the visualization
             plt.ion()                                   #Activate interactive mode
             plt.show()                                  #Show visualization
-            plt.pause(0.0001)                           #Pause between episodes in seconds
+            plt.pause(0.1)                           #Pause between episodes in seconds
 
             all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)
 
@@ -185,8 +187,8 @@ def main():
             if all_finished:
                 t = 0
                 break
-
-        epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
+        if i < num_episodes:
+            epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
 
         for idx in range(n_agents):
             if counts[idx] > 0:
@@ -221,7 +223,7 @@ def main():
                 prev_entropy[idx] = avg_entropy[idx]
                 prev_qdelta[idx]  = avg_qdelta[idx]
 
-    print(f"Agents collided {collisions} times in {i + 1} episodes.")
+    print(f"Agents collided {collisions} times in {num_test} episodes.")
     
 
 def trend_arrow(current, previous, higher_is_better=True):
@@ -342,8 +344,6 @@ def getLegalActions(state, route):
             return [-1, 0]
         if s == 2:
             return [-1]
-        
-
 
     if s == 0:
         return [0, 1]
@@ -458,7 +458,7 @@ hitting an obstacle, and being on the route are important to the reward function
 """
 
 
-def rewardFunction(agent, state, action, global_state):
+def rewardFunction(agent, state, action, global_state, log = False):
     global t
     route = agent.route
     
@@ -471,15 +471,38 @@ def rewardFunction(agent, state, action, global_state):
     const7 = 5      # Reward for slowing before the stop sign 
     const8 = 0.5    # Penalty for not moving
 
-    
-    return(const1 * Goal(state, route) 
-      - const2 * collisionCheck(agent, global_state) 
-      - const3 * t 
-      - const4 * proximityCheck(agent, state, global_state) 
-      - const5 * bubbleCheck(agent, state, global_state)
-      + const6 * stopArea(state, action) 
-      + const7 * slowArea(state, action) 
-      - const8 * notMoving(state, action))
+
+    goal_reward = const1 * Goal(state, route)
+    collision_penalty = const2 * collisionCheck(agent, global_state)
+    move_penalty = const3 * t
+    tailing_penalty = const4 * proximityCheck(agent, state, global_state)
+    bubble_penalty = const5 * bubbleCheck(agent, state, global_state)
+    stop_reward = const6 * stopArea(state, action)
+    slow_reward = const7 * slowArea(state, action)
+    not_moving_penalty = const8 * notMoving(state, action)
+
+    total_reward = (goal_reward - collision_penalty - move_penalty - tailing_penalty - bubble_penalty + stop_reward + slow_reward - not_moving_penalty)
+
+    if log:
+        """
+        print(f"Agent {agent.agent_n} | State: {state} | Action: {action} \nGlobal State: {global_state} \n Rewards: {{\n"
+              f"  Goal: {goal_reward},\n"
+              f"  Collision: -{collision_penalty},\n"
+              f"  Move: -{move_penalty},\n"
+              f"  Tailing: -{tailing_penalty},\n"
+              f"  Bubble: -{bubble_penalty},\n"
+              f"  Stop: {stop_reward},\n"
+              f"  Slow: {slow_reward},\n"
+              f"  Not Moving: -{not_moving_penalty}\n"
+              f"}} | Total Reward: {total_reward} \n")
+        """
+        if collision_penalty != 0:
+            print(f"collision penalty: {collision_penalty}")
+        if stop_reward != 0:
+            print(f"stop reward: {stop_reward}")
+        if slow_reward != 0:
+            print(f"slow reward: {slow_reward}")
+    return total_reward
 
 
 # Precompute for speed
@@ -494,22 +517,26 @@ for rid, info in routes.items():
         i = idx_of[(x, y)]
         for s in (0, 1, 2):
             tp[rid].setdefault((x, y, s), {})
+            candidates = list(neighboringStates((x, y, s), info))
             for action in getLegalActions((x, y, s), info):
                 tp[rid][(x, y, s)].setdefault(action, {})
-                # Candidate next states from neighboringStates()
-                for (nx, ny, ns) in neighboringStates((x, y, s), info):
+                if not candidates:
+                    continue
+                if action == 0: 
+                    p_intended = 0.99
+                else:
+                    p_intended = 0.90
+                
+                n_cand = len(candidates)
+                p_other = (1.0 - p_intended) / max(1, n_cand - 1)
+                    
+                for (nx, ny, ns) in candidates:
                     # Intended position is progress along the route by 's'
                     intended_pos_ok = (i + s < len(rlist) and (nx, ny) == rlist[i + s])
                     # Intended speed is s + action
                     intended_speed_ok = (ns == s + action)
                     is_intended = intended_pos_ok and intended_speed_ok
-
-                    if s == 0:
-                        tp[rid][(x, y, s)][action][(nx, ny, ns)] = 0.99 if is_intended else 0.01
-                    elif s == 1:
-                        tp[rid][(x, y, s)][action][(nx, ny, ns)] = 0.95 if is_intended else 0.05
-                    else:  # s == 2
-                        tp[rid][(x, y, s)][action][(nx, ny, ns)] = 0.90 if is_intended else 0.10
+                    tp[rid][(x, y, s)][action][(nx, ny, ns)] = p_intended if is_intended else p_other
 
 """
 FlatGridWorld
