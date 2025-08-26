@@ -110,44 +110,35 @@ def main():
     # Purely Egoistic: phi = 0
     global agents
 
-    agents = [Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+    agents = [Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
               #Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
-              Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+              Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
               ]
     
     env.agents = agents
     n_agents = len(agents)
 
-    #Running windows for policy stabiliy and q-deltas
-    entropy_window = np.zeros((n_agents, 100))
-    qdelta_window = np.zeros((n_agents, 100))
-    reward_window = np.zeros((n_agents, 100))
-
     #Initializing global state
     env.rebuildGlobalState()
-
-    #Running windows for policy stabiliy and q-deltas
-    entropy_window = np.zeros((n_agents, 100))
-    qdelta_window = np.zeros((n_agents, 100))
-    reward_window = np.zeros((n_agents, 100))
-
-    tot_reward = np.zeros(n_agents)
-    window_index = 0
     
     prev_rewards = [None] * n_agents
     prev_entropy = [None] * n_agents
     prev_qdelta  = [None] * n_agents
 
+    tot_reward = np.zeros(n_agents)
+    entropy_ep = np.zeros(n_agents)
+    qdelta_ep = np.zeros(n_agents)
+
+    avg_entropy = [0] * n_agents
+    avg_qdelta = [0] * n_agents
+    avg_rewrd = [0] * n_agents
+
     for i in tqdm(range(num_episodes + num_test)):
-        tot_reward[:] = 0
         for agent in agents:
             agent.reset()                               #Reset agent states
         
         env.rebuildGlobalState()
 
-        entropy_ep = np.zeros(n_agents)
-        qdelta_ep = np.zeros(n_agents)
-        counts = np.zeros(n_agents)
         if i >= num_episodes:
             if i == num_episodes:
                 tqdm.write(f"Agents collided {collisions} times in {i} episodes.")            
@@ -169,14 +160,13 @@ def main():
 
                 delta = agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
                 qdelta_ep[agent.agent_n - 1] += delta
-                counts[agent.agent_n - 1] += 1
 
                 s_prime = env.updateWorld(agent, action)
 
                 predicted_global_state = [a.state for a in sorted(env.agents, key=lambda ag: ag.agent_n)]
 
-                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
-
+                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=False)
+                tqdm.write(f"At episode {i} for agent {agent.agent_n}: {tot_reward[agent.agent_n - 1]}")
                 entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
 
             env.rebuildGlobalState()          
@@ -186,7 +176,7 @@ def main():
                 #Show the visualization
                 plt.ion()                                   #Activate interactive mode
                 plt.show()                                  #Show visualization
-                plt.pause(0.2)                           #Pause between episodes in seconds
+                plt.pause(0.02)                              #Pause between episodes in seconds
 
 
             all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)      
@@ -202,23 +192,12 @@ def main():
                 
         if i < num_episodes:
             epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
-
-        for idx in range(n_agents):
-            if counts[idx] > 0:
-                avg_entropy = entropy_ep[idx] / counts[idx]
-                avg_qdelta = qdelta_ep[idx] / counts[idx]
-            else:
-                avg_entropy, avg_qdelta = 0, 0
-
-            entropy_window[idx, window_index] = avg_entropy
-            qdelta_window[idx, window_index] = avg_qdelta
-
-        reward_window[:, window_index] = tot_reward
-        window_index = (window_index + 1) % 100
+        
         if ((i + 1) % 100) == 0:
-            avg_rewards = reward_window.mean(axis=1)
-            avg_entropy = entropy_window.mean(axis=1)
-            avg_qdelta = qdelta_window.mean(axis=1)
+            for idx in range(n_agents):
+                avg_entropy[idx] = entropy_ep[idx] / 100
+                avg_qdelta[idx] = qdelta_ep[idx] / 100
+                avg_rewrd[idx] = tot_reward[idx] / 100
             tqdm.write(f"Episode {i + 1}:")
 
             """
@@ -228,22 +207,24 @@ def main():
                         tqdm.write(f"Agent {agent.agent_n} stopped at stop sign {stop_counter[agent.agent_n - 1]}% of the time")
             """
 
-            stop_counter = [0] * n_agents
-
             for idx in range(n_agents):
-                arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
+                arrow_r = trend_arrow(avg_rewrd[idx], prev_rewards[idx], higher_is_better=True)
                 arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
                 arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
 
                 tqdm.write(
                     f"Agent {idx+1} | "
-                    f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
+                    f"reward={avg_rewrd[idx]:.2f}{arrow_r}, "
                     f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
                     f"ΔQ={avg_qdelta[idx]:.4f}{arrow_q}"
                 )
-                prev_rewards[idx] = avg_rewards[idx]
+                prev_rewards[idx] = avg_rewrd[idx]
                 prev_entropy[idx] = avg_entropy[idx]
                 prev_qdelta[idx]  = avg_qdelta[idx]
+
+            tot_reward = np.zeros(n_agents)
+            entropy_ep = np.zeros(n_agents)
+            qdelta_ep = np.zeros(n_agents)
 
     print(f"Agents collided {collisions} times in {num_test} episodes.")
     
@@ -288,12 +269,8 @@ def Goal(state, route):
 
 
 def hasCollided(global_state):
-    positions = [(state[0], state[1]) for state in global_state]
-
-    for pos in positions[:]:
-        for rid in routes:
-            if pos in routes[rid]["End Goal"] and pos in positions:
-                positions.remove(pos)
+    goal_cells = set().union(*[set(info["End Goal"]) for info in routes.values()])
+    positions = [(state[0], state[1]) for state in global_state if (state[0], state[1]) not in goal_cells]
     
     for state in global_state:
 
@@ -385,28 +362,6 @@ def notMoving(state, action):
         return 1
     else:
         return 0
-
-def stopArea(state, action):
-    x, y, s = state
-    if (x, y) in stop_region:
-        if s == 0 and action == 1:
-            return 2
-        elif s == 0 and action == 0: 
-            return 0.2
-        else:
-            return 0
-    else:
-        return 0
-
-def slowArea(state, action):
-    x, y, s = state
-    if (x, y) in slow_region:
-        if s == 1 and action == -1:
-            return 1
-        else:
-            return -1
-    else:
-        return 0
     
 def proximityCheck(agent, state, global_state):
     route = agent.route["Route"]
@@ -450,26 +405,26 @@ def bubbleCheck(agent, state, global_state):
                 penalty += 0.5
     return penalty
 
-def collisionCheck(agent, global_state):
-    agent_state = agent.state
-    agent_pos = (agent_state[0], agent_state[1])
-    agent_speed = agent_state[2]
+def collisionCheck(agent, state, global_state):
+    x, y, sp = state
+
     route = agent.route["Route"]
 
-    if agent_pos in agent.route["End Goal"]:
+    if (x, y) in agent.route["End Goal"]:
         return 0
     
-    other_states = [s for s in global_state if s != agent_state]
+    idx_self = agent.agent_n - 1
+    other_states = [s for i, s in enumerate(global_state) if s != idx_self]
 
-    if agent_pos in [(s[0], s[1]) for s in other_states]:
+    if (x, y)  in [(s[0], s[1]) for s in other_states]:
         return 1
 
-    if agent_pos in route:
-        idx = route.index(agent_pos)
+    if (x, y) in route:
+        idx = route.index((x, y))
         if idx + 1 < len(route):
             next_pos = route[idx + 1]
             for s in other_states:
-                if (s[0], s[1]) == next_pos and agent_speed == 2 and s[2] in (0, 1):
+                if (s[0], s[1]) == next_pos and sp == 2 and s[2] in (0, 1):
                     return 1
                 
     return 0
@@ -489,44 +444,33 @@ def rewardFunction(agent, state, action, global_state, log = False):
     
     const1 = 30     # Reward for reaching the goal
     const2 = 25     # Penalty for colliding with another agent
-    const3 = 0.05   # Penalty per move
-    const4 = 2      # Penalty for tailing another agent
-    const5 = 0.5    # Penalty for being within 2 squares of another agent
-    const6 = 0     # Reward for stopping at the stop sign
-    const7 = 0      # Reward for slowing before the stop sign 
-    const8 = 0.5    # Penalty for not moving
+    const3 = 0      # Penalty per move
+    const4 = 0      # Penalty for tailing another agent
+    const5 = 0      # Penalty for being within 2 squares of another agent 
+    const8 = 0     # Penalty for not moving
 
 
     goal_reward = const1 * Goal(state, route)
-    collision_penalty = const2 * collisionCheck(agent, global_state)
+    collision_penalty = const2 * collisionCheck(agent, state, global_state)
     move_penalty = const3 * t
     tailing_penalty = const4 * proximityCheck(agent, state, global_state)
     bubble_penalty = const5 * bubbleCheck(agent, state, global_state)
-    stop_reward = const6 * stopArea(state, action)
-    slow_reward = const7 * slowArea(state, action)
     not_moving_penalty = const8 * notMoving(state, action)
 
-    total_reward = (goal_reward - collision_penalty - move_penalty - tailing_penalty - bubble_penalty + stop_reward + slow_reward - not_moving_penalty)
+    total_reward = (goal_reward - collision_penalty - move_penalty - tailing_penalty - bubble_penalty - not_moving_penalty)
 
     if log:
-        """
-        print(f"Agent {agent.agent_n} | State: {state} | Action: {action} \nGlobal State: {global_state} \n Rewards: {{\n"
+        tqdm.write(f"Agent {agent.agent_n} | State: {state} | Action: {action} \nGlobal State: {global_state} \n Rewards: {{\n"
               f"  Goal: {goal_reward},\n"
               f"  Collision: -{collision_penalty},\n"
               f"  Move: -{move_penalty},\n"
               f"  Tailing: -{tailing_penalty},\n"
               f"  Bubble: -{bubble_penalty},\n"
-              f"  Stop: {stop_reward},\n"
-              f"  Slow: {slow_reward},\n"
               f"  Not Moving: -{not_moving_penalty}\n"
               f"}} | Total Reward: {total_reward} \n")
-        """
+        
         if collision_penalty != 0:
-            print(f"collision penalty: {collision_penalty}")
-        if stop_reward != 0:
-            print(f"stop reward: {stop_reward}")
-        if slow_reward != 0:
-            print(f"slow reward: {slow_reward}")
+            tqdm.write(f"collision penalty: {collision_penalty}")
     return total_reward
 
 
@@ -549,9 +493,9 @@ for rid, info in routes.items():
                     continue
                 if action == 0: 
 
-                    p_intended = 0.99
+                    p_intended = 1
                 else:
-                    p_intended = 0.90
+                    p_intended = 1
                 
                 n_cand = len(candidates)
 
