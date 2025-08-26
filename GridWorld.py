@@ -5,7 +5,6 @@ from matplotlib import colors
 import numpy as np
 import argparse
 import random
-import pprint
 import math
 from tqdm import tqdm
 from colorama import Fore, Style
@@ -16,7 +15,7 @@ parser.add_argument("testepisodes", type=int, help="The number of episodes to un
 args = parser.parse_args()
 
 start_state_1 = (13, 3, 1)
-start_state_2 = (13, 8, 0)
+start_state_2 = (13, 7, 0)
 start_state_3 = (0, 10, 2)
 start_state_4 = (6, 10, 2)
 
@@ -33,7 +32,7 @@ route_1 = [(13, r) for r in range(3, 24)]
 route_2 = [(13, r) for r in range (0, 11)]
 route_2.extend([(c, 10) for c in range(14, 24)])
 
-turn_2 = [(13, 8), (13, 9), (13,10), (14, 10), (15, 10)]
+turn_2 = [(13, 8), (13, 9), (13, 10), (14, 10), (15, 10)]
 
 route_3 = [(c, 10) for c in range(0, 24)]
 
@@ -48,16 +47,11 @@ routes["2"] = {"Route": route_2, "End Goal": end_goal_2, "Start State": start_st
 #Route 3: straight right
 routes["3"] = {"Route": route_3, "End Goal": end_goal_2, "Start State": start_state_3}
 
-#Route 3: straight right later later starting position
+#Route 4: straight right later later starting position
 routes["4"] = {"Route": route_4, "End Goal": end_goal_2, "Start State": start_state_4}
 
 allRoutes = route_1 + route_2 + route_3
 allGoals = end_goal_1 + end_goal_2
-
-
-#Stop sign regions
-stop_region = [(c, 8) for c in range(12, 15)]
-slow_region = [(c, 7) for c in range(12, 15)]
 
 #Obstacles 
 totObs = []
@@ -110,18 +104,13 @@ def main():
     # Purely Egoistic: phi = 0
     global agents
 
-    agents = [Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+    agents = [Agent(agent_n = 1, route = routes['2'], phi = math.pi / 4, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
               #Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
               Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
               ]
     
     env.agents = agents
     n_agents = len(agents)
-
-    #Running windows for policy stabiliy and q-deltas
-    entropy_window = np.zeros((n_agents, 100))
-    qdelta_window = np.zeros((n_agents, 100))
-    reward_window = np.zeros((n_agents, 100))
 
     #Initializing global state
     env.rebuildGlobalState()
@@ -143,8 +132,6 @@ def main():
         for agent in agents:
             agent.reset()                               #Reset agent states
         
-        env.rebuildGlobalState()
-
         entropy_ep = np.zeros(n_agents)
         qdelta_ep = np.zeros(n_agents)
         counts = np.zeros(n_agents)
@@ -158,6 +145,7 @@ def main():
         
  
         while True:
+            actions = {}
             for agent in agents:
                 
                 if ((agent.state[0], agent.state[1]) in agent.route["End Goal"]):
@@ -166,20 +154,24 @@ def main():
                 action = agent.getAction(env.global_state, epsilon)       #Get an action for agent i
                 if action is None:
                     continue
+                
+                actions[agent] = action
 
+            for agent, action in actions.items():
                 delta = agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
                 qdelta_ep[agent.agent_n - 1] += delta
+
+            next_states = env.updateWorld(actions)
+
+            for agent, action in actions.items():
+                s_prime = next_states[agent]
+                predicted_global_state = env.global_state
+                if i <= num_episodes:
+                    tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
+                else:
+                    tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
                 counts[agent.agent_n - 1] += 1
-
-                s_prime = env.updateWorld(agent, action)
-
-                predicted_global_state = [a.state for a in sorted(env.agents, key=lambda ag: ag.agent_n)]
-
-                tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
-
                 entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
-
-            env.rebuildGlobalState()          
 
             if i > num_episodes:
                 env.render()                                #Render in visualization
@@ -208,7 +200,7 @@ def main():
                 avg_entropy = entropy_ep[idx] / counts[idx]
                 avg_qdelta = qdelta_ep[idx] / counts[idx]
             else:
-                avg_entropy, avg_qdelta = 0, 0
+                avg_entropy, avg_qdelta = 0.0, 0.0
 
             entropy_window[idx, window_index] = avg_entropy
             qdelta_window[idx, window_index] = avg_qdelta
@@ -221,15 +213,6 @@ def main():
             avg_qdelta = qdelta_window.mean(axis=1)
             tqdm.write(f"Episode {i + 1}:")
 
-            """
-            for agent in agents:
-                for coord in agent.route["Route"]:
-                    if coord in stop_region:
-                        tqdm.write(f"Agent {agent.agent_n} stopped at stop sign {stop_counter[agent.agent_n - 1]}% of the time")
-            """
-
-            stop_counter = [0] * n_agents
-
             for idx in range(n_agents):
                 arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
                 arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
@@ -239,7 +222,7 @@ def main():
                     f"Agent {idx+1} | "
                     f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
                     f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
-                    f"ΔQ={avg_qdelta[idx]:.4f}{arrow_q}"
+                    f"|ΔQ|={avg_qdelta[idx]:.4f}{arrow_q}"
                 )
                 prev_rewards[idx] = avg_rewards[idx]
                 prev_entropy[idx] = avg_entropy[idx]
@@ -288,16 +271,12 @@ def Goal(state, route):
 
 
 def hasCollided(global_state):
-    positions = [(state[0], state[1]) for state in global_state]
-
-    for pos in positions[:]:
-        for rid in routes:
-            if pos in routes[rid]["End Goal"] and pos in positions:
-                positions.remove(pos)
+    goal_cells = set().union(*[set(info["End Goal"]) for info in routes.values()])
+    positions = [(state[0], state[1]) for state in global_state if (state[0], state[1]) not in goal_cells]
     
     for state in global_state:
 
-        for r, route in routes.items():
+        for _, route in routes.items():
             if (state[0], state[1]) in route["Route"]:
                 idx = route["Route"].index((state[0], state[1]))
                 if idx + 1 < len(route["Route"]):
@@ -338,11 +317,12 @@ def neighboringStates(state, route):
 
         # Speed > 0: move forward that many steps
         else:
-            for s in range(max(0, speed - 1), 3):  
-                next_idx = idx + speed
+            step = min(speed, len(route_list) - 1 - idx)
+            for next_s in range(max(0, speed - 1), 3):  
+                next_idx = idx + step
                 if next_idx < len(route_list):
                     next_r, next_c = route_list[next_idx]
-                    valid.append((next_r, next_c, s))
+                    valid.append((next_r, next_c, next_s))
 
     if "Turn" in route and (state[0], state[1]) in route["Turn"]:
         valid = [v for v in valid if v[2] != 2]
@@ -386,29 +366,10 @@ def notMoving(state, action):
     else:
         return 0
 
-def stopArea(state, action):
-    x, y, s = state
-    if (x, y) in stop_region:
-        if s == 0 and action == 1:
-            return 2
-        elif s == 0 and action == 0: 
-            return 0.2
-        else:
-            return 0
-    else:
-        return 0
-
-def slowArea(state, action):
-    x, y, s = state
-    if (x, y) in slow_region:
-        if s == 1 and action == -1:
-            return 1
-        else:
-            return -1
-    else:
-        return 0
     
 def proximityCheck(agent, state, global_state):
+    if Goal(state, agent.route):
+        return 0
     route = agent.route["Route"]
     x, y, _ = state
     for idx, entry in enumerate(route):
@@ -417,18 +378,20 @@ def proximityCheck(agent, state, global_state):
             adj_two = route[idx + 2] if idx + 2 < len(route) else None
             break
 
-    found = False
     penalty = 0
-    for s in global_state:
-        x, y, _ = s
-        if not found and s == state:
-            found = True
+    for idx, s in enumerate(global_state):
+        if idx == agent.agent_n - 1:
             continue
-        if (x, y) == adj_one:
+        ox, oy, _ = s
+        other_agent = agent.env.agents[idx]
+        if Goal(s, other_agent.route):
+            continue
+        if (ox, oy) == adj_one:
             penalty = max(penalty, 1)
-        elif (x, y) == adj_two:
+        elif (ox, oy) == adj_two:
             penalty = max(penalty, 0.25)
     return penalty 
+
 
 def bubbleCheck(agent, state, global_state):
     if Goal(state, agent.route):
@@ -443,35 +406,37 @@ def bubbleCheck(agent, state, global_state):
     for idx, other_state in enumerate(global_state):
         if idx == agent.agent_n - 1:
             continue
-        if other_state in bubble_2 and not Goal(other_state, agent.route):
+        other_agent = agent.env.agents[idx]
+        if Goal(other_state, other_agent.route):
+            continue
+        if other_state in bubble_2:
             if other_state in bubble_1:
                 penalty += 1
             else:
                 penalty += 0.5
     return penalty
 
-def collisionCheck(agent, global_state):
-    agent_state = agent.state
-    agent_pos = (agent_state[0], agent_state[1])
-    agent_speed = agent_state[2]
+
+def collisionCheck(agent, state, global_state):
+    x, y, sp = state
     route = agent.route["Route"]
 
-    if agent_pos in agent.route["End Goal"]:
+    if (x, y) in agent.route["End Goal"]:
         return 0
     
-    other_states = [s for s in global_state if s != agent_state]
+    idx_self = agent.agent_n - 1
+    other_states = [s for i, s in enumerate(global_state) if i != idx_self]
 
-    if agent_pos in [(s[0], s[1]) for s in other_states]:
+    if (x, y) in [(s[0], s[1]) for s in other_states]:
         return 1
 
-    if agent_pos in route:
-        idx = route.index(agent_pos)
-        if idx + 1 < len(route):
-            next_pos = route[idx + 1]
+    if (x, y) in route:
+        i = route.index((x, y))
+        if i + 1 < len(route):
+            next_pos = route[i + 1]
             for s in other_states:
-                if (s[0], s[1]) == next_pos and agent_speed == 2 and s[2] in (0, 1):
-                    return 1
-                
+                if (s[0], s[1]) == next_pos and sp == 2 and s[2] in (0, 1):
+                    return 1      
     return 0
 
 
@@ -482,51 +447,38 @@ This function takes the state and action of an agent and returns the reward prod
 hitting an obstacle, and being on the route are important to the reward function. 
 """
 
-
 def rewardFunction(agent, state, action, global_state, log = False):
     global t
     route = agent.route
     
-    const1 = 30     # Reward for reaching the goal
-    const2 = 25     # Penalty for colliding with another agent
+    const1 = 10     # Reward for reaching the goal
+    const2 = 10     # Penalty for colliding with another agent
     const3 = 0.05   # Penalty per move
     const4 = 2      # Penalty for tailing another agent
-    const5 = 0.5    # Penalty for being within 2 squares of another agent
-    const6 = 0     # Reward for stopping at the stop sign
-    const7 = 0      # Reward for slowing before the stop sign 
-    const8 = 0.5    # Penalty for not moving
+    const5 = 0.5    # Penalty for being within 2 squares of another agent 
+    const6 = 0.5    # Penalty for not moving
 
 
     goal_reward = const1 * Goal(state, route)
-    collision_penalty = const2 * collisionCheck(agent, global_state)
+    collision_penalty = const2 * collisionCheck(agent, state, global_state)
     move_penalty = const3 * t
     tailing_penalty = const4 * proximityCheck(agent, state, global_state)
     bubble_penalty = const5 * bubbleCheck(agent, state, global_state)
-    stop_reward = const6 * stopArea(state, action)
-    slow_reward = const7 * slowArea(state, action)
-    not_moving_penalty = const8 * notMoving(state, action)
+    not_moving_penalty = const6 * notMoving(state, action)
 
-    total_reward = (goal_reward - collision_penalty - move_penalty - tailing_penalty - bubble_penalty + stop_reward + slow_reward - not_moving_penalty)
+    total_reward = (goal_reward - collision_penalty - move_penalty - tailing_penalty - bubble_penalty - not_moving_penalty)
 
     if log:
-        """
+        
         print(f"Agent {agent.agent_n} | State: {state} | Action: {action} \nGlobal State: {global_state} \n Rewards: {{\n"
               f"  Goal: {goal_reward},\n"
               f"  Collision: -{collision_penalty},\n"
               f"  Move: -{move_penalty},\n"
               f"  Tailing: -{tailing_penalty},\n"
               f"  Bubble: -{bubble_penalty},\n"
-              f"  Stop: {stop_reward},\n"
-              f"  Slow: {slow_reward},\n"
               f"  Not Moving: -{not_moving_penalty}\n"
               f"}} | Total Reward: {total_reward} \n")
-        """
-        if collision_penalty != 0:
-            print(f"collision penalty: {collision_penalty}")
-        if stop_reward != 0:
-            print(f"stop reward: {stop_reward}")
-        if slow_reward != 0:
-            print(f"slow reward: {slow_reward}")
+        
     return total_reward
 
 
@@ -548,7 +500,6 @@ for rid, info in routes.items():
                 if not candidates:
                     continue
                 if action == 0: 
-
                     p_intended = 0.99
                 else:
                     p_intended = 0.90
@@ -556,11 +507,13 @@ for rid, info in routes.items():
                 n_cand = len(candidates)
 
                 p_other = (1.0 - p_intended) / max(1, n_cand - 1)
-                    
+
+                step = min(s, len(rlist) - 1 - i)
+
                 for (nx, ny, ns) in candidates:
 
                     # Intended position is progress along the route by 's'
-                    intended_pos_ok = (i + s < len(rlist) and (nx, ny) == rlist[i + s])
+                    intended_pos_ok = ((nx, ny) == rlist[i + step])
                     # Intended speed is s + action
                     intended_speed_ok = (ns == s + action)
                     is_intended = intended_pos_ok and intended_speed_ok
@@ -641,16 +594,35 @@ class FlatGridWorld:
     updateWorld() takes an agent and a chosen action and runs it past the environment before updating the agents state. Importantly, 
     it takes the probabilities from tp and updates the agent state accordingly. 
     """
-    def updateWorld(self, agent, chosen_action):
-        for key, value in routes.items():
-            if value is agent.route:
-                route_num = key
-        if chosen_action in getLegalActions(agent.state, agent.route):
-            next_state = random.choices(list(tp[route_num][agent.state][chosen_action].keys()), weights=list(tp[route_num][agent.state][chosen_action].values()), k=1)[0]
-            agent.state = next_state
+    def updateWorld(self, actions):
+        # Where actions is a dict {agent: action}
+
+        new_states = {}
+        for agent, action in actions.items():
+            route_num = None
+            for key, value in routes.items():
+                if value is agent.route:
+                    route_num = key
+                    break
+
+
+            next_states = list(tp[route_num][agent.state][action].keys())
+            probs = list(tp[route_num][agent.state][action].values())
+            
+            if not next_states:
+                s_prime = agent.state
+            else:
+                s_prime = random.choices(next_states, weights=probs, k=1)[0]
+            
+            new_states[agent] = s_prime
+        
+        for agent, s_prime in new_states.items():
+            agent.state = s_prime
+
+        self.global_state = [agent.state for agent in sorted(self.agents, key = lambda ag: ag.agent_n)]
         global t
         t += 1
-        return next_state
+        return new_states
 
     def rebuildGlobalState(self):
         self.global_state = [agent.state for agent in sorted(self.agents, key = lambda ag: ag.agent_n)]
@@ -730,7 +702,7 @@ class Agent:
         current_q = self.getQValue(global_state, action)
         new_q = ((1 - lr) * current_q) + (lr * target)
 
-        delta = new_q - current_q
+        delta = abs(new_q - current_q)
 
         state_key = tuple(global_state)
         if state_key not in self.qtable:
