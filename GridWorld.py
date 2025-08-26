@@ -116,17 +116,16 @@ def main():
     #Initializing global state
     env.rebuildGlobalState()
     
-    prev_rewards = [None] * n_agents
-    prev_entropy = [None] * n_agents
-    prev_qdelta  = [None] * n_agents
+    entropy_window = np.zeros((n_agents, 100))
+    qdelta_window = np.zeros((n_agents, 100))
+    reward_window = np.zeros((n_agents, 100))
 
     tot_reward = np.zeros(n_agents)
-    entropy_ep = np.zeros(n_agents)
-    qdelta_ep = np.zeros(n_agents)
+    window_index = 0
 
-    avg_entropy = [0] * n_agents
-    avg_qdelta = [0] * n_agents
-    avg_rewrd = [0] * n_agents
+    prev_rewards = [None] * n_agents
+    prev_entropy = [None] * n_agents
+    prev_qdelta = [None] * n_agents
 
     for i in tqdm(range(num_episodes + num_test)):
         for agent in agents:
@@ -212,23 +211,23 @@ def main():
 
         if ((i + 1) % 100) == 0:
             for idx in range(n_agents):
-                avg_entropy[idx] = entropy_ep[idx] / 100
-                avg_qdelta[idx] = qdelta_ep[idx] / 100
-                avg_rewrd[idx] = tot_reward[idx] / 100
+                avg_entropy = entropy_window.mean(axis = 1)
+                avg_qdelta = qdelta_window.mean(axis = 1)
+                avg_rewards = reward_window.mean(axis = 1)
             tqdm.write(f"Episode {i + 1}:")
 
             for idx in range(n_agents):
-                arrow_r = trend_arrow(avg_rewrd[idx], prev_rewards[idx], higher_is_better=True)
+                arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
                 arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
                 arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
 
                 tqdm.write(
                     f"Agent {idx+1} | "
-                    f"reward={avg_rewrd[idx]:.2f}{arrow_r}, "
+                    f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
                     f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
                     f"|ΔQ|={avg_qdelta[idx]:.4f}{arrow_q}"
                 )
-                prev_rewards[idx] = avg_rewrd[idx]
+                prev_rewards[idx] = avg_rewards[idx]
                 prev_entropy[idx] = avg_entropy[idx]
                 prev_qdelta[idx]  = avg_qdelta[idx]
 
@@ -446,8 +445,7 @@ def collisionCheck(agent, state, global_state):
             for s in other_states:
                 if (s[0], s[1]) == next_pos and sp == 2 and s[2] in (0, 1):
                     return 1      
-    else:
-        return 0
+    return 0
 
 
 """
