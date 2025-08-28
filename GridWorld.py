@@ -150,13 +150,13 @@ def main() -> None:
     env.global_state = [agent.state for agent in sorted(agents, key = lambda ag: ag.agent_n)]
 
     for i in tqdm(range(num_episodes + num_test)):
-        tot_reward[:] = 0
         for agent in agents:
             agent.reset()                               #Reset agent states
         
         entropy_ep = np.zeros(n_agents)
         qdelta_ep = np.zeros(n_agents)
         counts = np.zeros(n_agents)
+
         if i >= num_episodes:
             if i == num_episodes:
                 tqdm.write(f"Agents collided {collisions} times in {i} episodes.")            
@@ -193,6 +193,7 @@ def main() -> None:
                 else:
                     tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
                 counts[agent.agent_n - 1] += 1
+
                 entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
 
             if i > num_episodes:
@@ -230,26 +231,32 @@ def main() -> None:
 
         reward_window[:, window_index] = tot_reward
         window_index = (window_index + 1) % 100
+
         if ((i + 1) % 100) == 0:
-            avg_rewards = reward_window.mean(axis=1)
-            avg_entropy = entropy_window.mean(axis=1)
-            avg_qdelta = qdelta_window.mean(axis=1)
+            for idx in range(n_agents):
+                avg_entropy[idx] = entropy_ep[idx] / 100
+                avg_qdelta[idx] = qdelta_ep[idx] / 100
+                avg_rewrd[idx] = tot_reward[idx] / 100
             tqdm.write(f"Episode {i + 1}:")
 
             for idx in range(n_agents):
-                arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
+                arrow_r = trend_arrow(avg_rewrd[idx], prev_rewards[idx], higher_is_better=True)
                 arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
                 arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
 
                 tqdm.write(
                     f"Agent {idx+1} | "
-                    f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
+                    f"reward={avg_rewrd[idx]:.2f}{arrow_r}, "
                     f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
                     f"|ΔQ|={avg_qdelta[idx]:.4f}{arrow_q}"
                 )
-                prev_rewards[idx] = avg_rewards[idx]
+                prev_rewards[idx] = avg_rewrd[idx]
                 prev_entropy[idx] = avg_entropy[idx]
                 prev_qdelta[idx]  = avg_qdelta[idx]
+
+            tot_reward = np.zeros(n_agents)
+            entropy_ep = np.zeros(n_agents)
+            qdelta_ep = np.zeros(n_agents)
 
     print(f"Agents collided {collisions} times in {num_test} episodes.")
 
@@ -556,6 +563,7 @@ def collisionCheck(agent, state, global_state) -> int:
     """
 
     x, y, sp = state
+
     route = agent.route["Route"]
 
     # Ensure multiple agents in same end goal aren't considered to have collided
@@ -659,7 +667,9 @@ for rid, info in routes.items():
                 # Action = 0 (keep speed) is more reliable than speed changes
                 if action == 0:
                     p_intended = 0.99
+
                 else:
+                    p_intended = 0.95
                     p_intended = 0.95
                 
                 n_cand = len(candidates)
