@@ -12,12 +12,13 @@ from colorama import Fore, Style
 parser = argparse.ArgumentParser()
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
 parser.add_argument("testepisodes", type=int, help="The number of episodes to undergo during testing")
+parser.add_argument("scenario", type = str, help="A string which is the name of the scenario which is being run")
 args = parser.parse_args()
 
 start_state_1 = (13, 3, 1)
 start_state_2 = (13, 7, 0)
 start_state_3 = (0, 10, 2)
-start_state_4 = (6, 10, 2)
+start_state_4 = (5, 10, 2)
 
 #End Goals
 end_goal_1 = []
@@ -32,7 +33,7 @@ route_1 = [(13, r) for r in range(3, 24)]
 route_2 = [(13, r) for r in range (0, 11)]
 route_2.extend([(c, 10) for c in range(14, 24)])
 
-turn_2 = [(13, 8), (13, 9), (13, 10), (14, 10), (15, 10)]
+turn_2 = [(13,7), (13, 8), (13, 9), (13, 10), (14, 10)]
 
 route_3 = [(c, 10) for c in range(0, 24)]
 
@@ -89,8 +90,9 @@ def main():
     global t
     global lr
     global n_agents
-    epsilon = 1
 
+    epsilon = 1
+    other_reward = 0
     collisions = 0
 
     #Environment object that is updated and rendered
@@ -104,37 +106,43 @@ def main():
     # Purely Egoistic: phi = 0
     global agents
 
-    agents = [Agent(agent_n = 1, route = routes['2'], phi = math.pi / 4, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
-              #Agent(agent_n = 2, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 0.69, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
-              Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
-              ]
+    agents = scenario_init(args.scenario)
     
     env.agents = agents
     n_agents = len(agents)
 
     #Initializing global state
-    env.rebuildGlobalState()
+    env.global_state = [agent.state for agent in sorted(agents, key = lambda ag: ag.agent_n)]
 
     #Running windows for policy stabiliy and q-deltas
     entropy_window = np.zeros((n_agents, 100))
     qdelta_window = np.zeros((n_agents, 100))
     reward_window = np.zeros((n_agents, 100))
+    other_window = np.zeros((n_agents, 100))
 
-    tot_reward = np.zeros(n_agents)
+    avg_rewards = [0] * n_agents
+    avg_entropy = [0] * n_agents 
+    avg_qdelta = [0] * n_agents
+    avg_other = [0] * n_agents
+    svo_reward = [0] * n_agents
+
     window_index = 0
     
-    prev_rewards = [None] * n_agents
-    prev_entropy = [None] * n_agents
-    prev_qdelta  = [None] * n_agents
+    prev_rewards = [0] * n_agents
+    prev_entropy = [0] * n_agents
+    prev_qdelta  = [0] * n_agents
+    prev_svo_reward = [0] * n_agents
 
-    for i in tqdm(range(num_episodes + num_test)):
-        tot_reward[:] = 0
+    for i in tqdm(range(num_episodes + num_test), mininterval = 5.0):
         for agent in agents:
             agent.reset()                               #Reset agent states
         
         entropy_ep = np.zeros(n_agents)
         qdelta_ep = np.zeros(n_agents)
+        reward_ep = np.zeros(n_agents)
+
         counts = np.zeros(n_agents)
+
         if i >= num_episodes:
             if i == num_episodes:
                 tqdm.write(f"Agents collided {collisions} times in {i} episodes.")            
@@ -167,11 +175,14 @@ def main():
                 s_prime = next_states[agent]
                 predicted_global_state = env.global_state
                 if i <= num_episodes:
-                    tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
+                    reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
                 else:
-                    tot_reward[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
-                counts[agent.agent_n - 1] += 1
+                    reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
+                    tqdm.write(f"SVO Reward for Agent {agent.agent_n}: {svo_reward[agent.agent_n - 1]} \n")
+
                 entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
+
+            counts[agent.agent_n - 1] += 1
 
             if i > num_episodes:
                 env.render()                                #Render in visualization
@@ -197,39 +208,68 @@ def main():
 
         for idx in range(n_agents):
             if counts[idx] > 0:
-                avg_entropy = entropy_ep[idx] / counts[idx]
-                avg_qdelta = qdelta_ep[idx] / counts[idx]
-            else:
-                avg_entropy, avg_qdelta = 0.0, 0.0
+                avg_entropy[idx] = entropy_ep[idx] / counts[idx]
+                avg_qdelta[idx] = qdelta_ep[idx] / counts[idx]
+                avg_rewards[idx] = reward_ep[idx] / counts[idx]
 
-            entropy_window[idx, window_index] = avg_entropy
-            qdelta_window[idx, window_index] = avg_qdelta
+        for idx in range(n_agents):
+            entropy_window[idx, window_index] = avg_entropy[idx]
+            qdelta_window[idx, window_index] = avg_qdelta[idx]
+            reward_window[idx, window_index] = avg_rewards[idx]
+            other_window[idx, window_index] = avg_other[idx]
 
-        reward_window[:, window_index] = tot_reward
         window_index = (window_index + 1) % 100
-        if ((i + 1) % 100) == 0:
+        if ((i + 1) % 100) == 0 or i > num_episodes:
             avg_rewards = reward_window.mean(axis=1)
             avg_entropy = entropy_window.mean(axis=1)
             avg_qdelta = qdelta_window.mean(axis=1)
+
+            if n_agents > 1:
+                total_avg = sum(avg_rewards)
+                avg_other = (total_avg - avg_rewards) / (n_agents - 1)
+            else:
+                avg_other = np.zeros(n_agents)
+
+            for idx in range(n_agents):
+                svo_reward[idx] = (avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi))
+
             tqdm.write(f"Episode {i + 1}:")
 
             for idx in range(n_agents):
                 arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
                 arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
                 arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
+                arrow_svo = trend_arrow(svo_reward[idx], prev_svo_reward[idx], higher_is_better=True)
 
                 tqdm.write(
                     f"Agent {idx+1} | "
                     f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
                     f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
-                    f"|ΔQ|={avg_qdelta[idx]:.4f}{arrow_q}"
+                    f"|ΔQ|={avg_qdelta[idx]:.4f}{arrow_q}, \n "
+                    f"Other Reward: {avg_other[idx]:.2f} | "
+                    f"Total Weighted Reward: {avg_rewards[idx]:.2f} * cos({(agents[idx].phi):.2f}) + {avg_other[idx]:.2f} * sin({(agents[idx].phi):.2f}) = {(avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi)):.2f}{arrow_svo}"
                 )
                 prev_rewards[idx] = avg_rewards[idx]
                 prev_entropy[idx] = avg_entropy[idx]
                 prev_qdelta[idx]  = avg_qdelta[idx]
+                prev_svo_reward[idx] = svo_reward[idx]
 
     print(f"Agents collided {collisions} times in {num_test} episodes.")
+
+    for agent in agents:
+        tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
     
+
+def scenario_init(scenario):
+    if scenario == "2_agent_right_turn":
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+                Agent(agent_n = 2, route = routes['4'], phi = math.pi / 3, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                ])
+    if scenario == "3_agent_right_turn":
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 0.88, beta = 0.88, env=env),
+                Agent(agent_n = 2, route = routes['4'], phi = math.pi / 3, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 0.88, beta = 0.88, env=env),
+                Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 0.88, beta = 0.88, env=env)
+                ])
 
 def trend_arrow(current, previous, higher_is_better=True):
     if previous is None:
@@ -437,6 +477,17 @@ def collisionCheck(agent, state, global_state):
             for s in other_states:
                 if (s[0], s[1]) == next_pos and sp == 2 and s[2] in (0, 1):
                     return 1      
+    
+    for _, r in routes.items():
+        other_route = r["Route"]
+        for os in other_states:
+            if (os[0], os[1]) in other_route:
+                j = other_route.index((os[0], os[1]))
+                if j + 1 < len(other_route):
+                    next_pos = other_route[j + 1]
+                    if ((x, y) == next_pos and os[2] == 2 and sp in (0, 1)):
+                        return 1
+                    
     return 0
 
 
@@ -450,16 +501,24 @@ hitting an obstacle, and being on the route are important to the reward function
 def rewardFunction(agent, state, action, global_state, log = False):
     global t
     route = agent.route
-    
-    const1 = 10     # Reward for reaching the goal
-    const2 = 10     # Penalty for colliding with another agent
-    const3 = 0.05   # Penalty per move
-    const4 = 2      # Penalty for tailing another agent
+
+    at_goal = [False] * n_agents
+
+    if t == 0:
+        at_goal = [False] * n_agents
+
+    const1 = 40     # Reward for reaching the goal
+    const2 = 100     # Penalty for colliding with another agent
+    const3 = 0.75   # Penalty per move
+    const4 = 5      # Penalty for tailing another agent
     const5 = 0.5    # Penalty for being within 2 squares of another agent 
-    const6 = 0.5    # Penalty for not moving
+    const6 = 2    # Penalty for not moving
 
+    if at_goal[agent.agent_n - 1] == False:
+        goal_reward = const1 * Goal(state, route)
+    elif at_goal[agent.agent_n - 1] == True:
+        goal_reward = 0
 
-    goal_reward = const1 * Goal(state, route)
     collision_penalty = const2 * collisionCheck(agent, state, global_state)
     move_penalty = const3 * t
     tailing_penalty = const4 * proximityCheck(agent, state, global_state)
@@ -571,8 +630,8 @@ class FlatGridWorld:
                  fontsize=10, color='black', 
                  verticalalignment='bottom', horizontalalignment='left')
 
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', (1,1,0,0.5), (1,0,0,0.5)])
-        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2, 2.5]
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
+        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
         plt.imshow(grid.T, cmap=cmap, norm=norm)
@@ -623,9 +682,6 @@ class FlatGridWorld:
         global t
         t += 1
         return new_states
-
-    def rebuildGlobalState(self):
-        self.global_state = [agent.state for agent in sorted(self.agents, key = lambda ag: ag.agent_n)]
 
 """
 Agent
