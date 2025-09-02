@@ -33,7 +33,6 @@ route_2.extend([(c, 10) for c in range(14, 24)])
 
 turn_2 = [(13, 7), (13, 8), (13, 9), (13, 10), (14, 10)]
 
-
 route_3 = [(c, 10) for c in range(0, 24)]
 
 route_4 = [(c, 10) for c in range(4, 24)]
@@ -53,7 +52,6 @@ routes["3"] = {"Route": route_3, "End Goal": end_goal_2, "Start State": start_st
 # Route 4: straight right later later starting position
 routes["4"] = {"Route": route_4, "End Goal": end_goal_2, "Start State": start_state_4}
 
-allRoutes = route_1 + route_2 + route_3
 allGoals = end_goal_1 + end_goal_2
 
 #Obstacles 
@@ -126,13 +124,10 @@ def main() -> None:
     # Mid Altruistic: phi = pi/4
     # Purely Egoistic: phi = 0
 
-    global agents
-
     agents = scenario_init(args.scenario)
     
     env.agents = agents
     n_agents = len(agents)
-
 
     #Initializing global state
     env.global_state = [agent.state for agent in sorted(agents, key = lambda ag: ag.agent_n)]
@@ -179,14 +174,13 @@ def main() -> None:
             for agent, action in actions.items():
                 s_prime = next_states[agent]
                 predicted_global_state = env.global_state
-                if i <= num_episodes:
+                if i < num_episodes:
                     reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
                 else:
                     reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
-                    tqdm.write(f"SVO Reward for Agent {agent.agent_n}: {svo_reward[agent.agent_n - 1]} \n")
-                
-                #counts[agent.agent_n - 1] += 1
 
+                    tqdm.write(f"SVO Reward for Agent {agent.agent_n}: {svo_reward[agent.agent_n - 1]} \n")
+            
             if i > num_episodes:
                 env.render()                #Render in visualization
 
@@ -211,6 +205,7 @@ def main() -> None:
 
         for idx in range(n_agents):
             avg_rewards[idx] = reward_ep[idx] / 100 
+
 
         if ((i + 1) % 100) == 0 or i > num_episodes:
             if n_agents > 1:
@@ -247,7 +242,16 @@ def main() -> None:
         tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
     
 
-def scenario_init(scenario):
+def scenario_init(scenario) -> None:
+    """Initializes the agent parameters according to the scenario argument.
+
+    Args:
+        scenario (string): Command line argument.
+
+    Returns:
+        None
+    """
+    
     if scenario == "2_agent_right_turn":
         return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
@@ -294,26 +298,22 @@ def policy_entropy(agent, global_state, epsilon) -> float:
     """
     
     # Collect Q-values for all legal actions in this state.
-    q_values = [agent.getQValue(global_state, a) for a in getLegalActions(agent.state, agent.route)]
-    if not q_values:
+    legal = getLegalActions(agent.state, agent.route)
+    if not legal:
         return 0.0
-
-    n_actions = len(q_values)
+    q_values = [agent.getQValue(global_state, a) for a in legal]
+    n = len(legal)
     best = max(q_values)
-    probs = []
 
     # Construct action probabilities under epsilon-greedy policy
-    for q in q_values:
-        if q == best:
-            # Best action gets - epsilon plus its share of exploration mass
-          # Entropy = -∑ p log p (small offset avoids log(0))
-            probs.append((1 - epsilon) + epsilon / n_actions)
-        else:
-            # Non-greedy actions get only the exploration mass
-            probs.append(epsilon / n_actions)
-
+    idx_best = [i for i, q in enumerate(q_values) if q ==best]
+    k = len(idx_best)
+    probs = np.full(n, epsilon / n, dtype=float)
+    if k > 0:
+        probs[idx_best] += (1.0 - epsilon) / k
+    
     # Entropy = -∑ p log p (small offset avoids log(0))
-    return -sum(p * math.log(p + 1e-12) for p in probs)
+    return - float(np.sum(probs * np.log(probs + 1e-12)))
 
 
 def Goal(state, route) -> int:
@@ -744,15 +744,15 @@ class FlatGridWorld:
                 grid[coord] = 0.8
 
         for i in range(n_agents):
-            if ((self.agents[i].state[0], self.agents[i].state[1])) not in allGoals:
-                grid[(self.agents[i].state[0], self.agents[i].state[1])] = 1.0
-                for _ , agent in enumerate(self.agents):
-                    x, y = agent.state[0], agent.state[1]
-                    plt.text(x, y, agent.agent_n,   # agent index as the number
-                            ha='center', va='center',
-                            fontsize=8, color='white')
+            x, y = self.agents[i].state[0], self.agents[i].state[1]
+            if (x, y) not in allGoals:
+                grid[(x, y)] = 1.0
             else:
-                grid[(self.agents[i].state[0], self.agents[i].state[1])] = 0.2
+                grid[(x, y)] = 0.2
+
+        for agent in self.agents:
+            x, y = agent.state[0], agent.state[1]
+            plt.text(x, y, str.agent.agent_n, ha='center', va='center', fontsize=8, color='white')
 
         # Display the number of ticks occurring in an episode
         plt.text(0.05, 0.05, f"Ticks: {t}", 
@@ -845,7 +845,6 @@ class Agent:
 
         Returns:
             None
-        
         """
 
         self.agent_n = agent_n
