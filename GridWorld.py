@@ -132,33 +132,18 @@ def main() -> None:
     #Initializing global state
     env.global_state = [agent.state for agent in sorted(agents, key = lambda ag: ag.agent_n)]
 
-    #Running windows for policy stabiliy and q-deltas
-    entropy_window = np.zeros((n_agents, 100))
-    qdelta_window = np.zeros((n_agents, 100))
-    reward_window = np.zeros((n_agents, 100))
-    other_window = np.zeros((n_agents, 100))
-
     avg_rewards = [0] * n_agents
-    avg_entropy = [0] * n_agents 
-    avg_qdelta = [0] * n_agents
     avg_other = [0] * n_agents
     svo_reward = [0] * n_agents
 
-    window_index = 0
+    reward_ep = np.zeros(n_agents)
     
     prev_rewards = [0] * n_agents
-    prev_entropy = [0] * n_agents
-    prev_qdelta  = [0] * n_agents
     prev_svo_reward = [0] * n_agents
 
     for i in tqdm(range(num_episodes + num_test), mininterval = 5.0):
         for agent in agents:
             agent.reset()                               #Reset agent states
-        
-        entropy_ep = np.zeros(n_agents)
-        qdelta_ep = np.zeros(n_agents)
-        reward_ep = np.zeros(n_agents)
-        counts = np.zeros(n_agents)
 
         if i >= num_episodes:
             if i == num_episodes:
@@ -168,7 +153,6 @@ def main() -> None:
             lr = 0
             epsilon = 0
         
- 
         while True:
             actions = {}
             for agent in agents:
@@ -183,8 +167,7 @@ def main() -> None:
                 actions[agent] = action
 
             for agent, action in actions.items():
-                delta = agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
-                qdelta_ep[agent.agent_n - 1] += delta
+                agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
 
             next_states = env.updateWorld(actions)
 
@@ -195,10 +178,10 @@ def main() -> None:
                     reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
                 else:
                     reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
-                entropy_ep[agent.agent_n - 1] += policy_entropy(agent, env.global_state, epsilon)
-                counts[agent.agent_n - 1] += 1
 
-            if i >= num_episodes:
+                    tqdm.write(f"SVO Reward for Agent {agent.agent_n}: {svo_reward[agent.agent_n - 1]} \n")
+            
+            if i > num_episodes:
                 env.render()                #Render in visualization
 
                 #Show the visualization
@@ -221,27 +204,14 @@ def main() -> None:
             epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
 
         for idx in range(n_agents):
-            if counts[idx] > 0:
-                avg_entropy[idx] = entropy_ep[idx] / counts[idx]
-                avg_qdelta[idx] = qdelta_ep[idx] / counts[idx]
-                avg_rewards[idx] = reward_ep[idx] / counts[idx]
+            avg_rewards[idx] = reward_ep[idx] / 100 
 
-        for idx in range(n_agents):
-            entropy_window[idx, window_index] = avg_entropy[idx]
-            qdelta_window[idx, window_index] = avg_qdelta[idx]
-            reward_window[idx, window_index] = avg_rewards[idx]
-            other_window[idx, window_index] = avg_other[idx]
 
-        window_index = (window_index + 1) % 100
-
-        if ((i + 1) % 100) == 0 or i >= num_episodes:
-            avg_rewards = reward_window.mean(axis=1)
-            avg_entropy = entropy_window.mean(axis=1)
-            avg_qdelta = qdelta_window.mean(axis=1)
-
+        if ((i + 1) % 100) == 0 or i > num_episodes:
             if n_agents > 1:
                 total_avg = sum(avg_rewards)
-                avg_other = (total_avg - avg_rewards) / (n_agents - 1)
+                for n in range(n_agents):
+                    avg_other[n] = (total_avg - avg_rewards[n]) / (n_agents - 1)
             else:
                 avg_other = np.zeros(n_agents)
 
@@ -252,24 +222,21 @@ def main() -> None:
 
             for idx in range(n_agents):
                 arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
-                arrow_e = trend_arrow(avg_entropy[idx], prev_entropy[idx], higher_is_better=False)  # usually lower entropy = more confident
-                arrow_q = trend_arrow(avg_qdelta[idx], prev_qdelta[idx], higher_is_better=False)   # smaller ΔQ means more stable
                 arrow_svo = trend_arrow(svo_reward[idx], prev_svo_reward[idx], higher_is_better=True)
 
                 tqdm.write(
                     f"Agent {idx+1} | "
                     f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
-                    f"entropy={avg_entropy[idx]:.3f}{arrow_e}, "
-                    f"|ΔQ|={avg_qdelta[idx]:.4f}{arrow_q}, \n "
                     f"Other Reward: {avg_other[idx]:.2f} | "
                     f"Total Weighted Reward: {avg_rewards[idx]:.2f} * cos({(agents[idx].phi):.2f}) + {avg_other[idx]:.2f} * sin({(agents[idx].phi):.2f}) = {(avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi)):.2f}{arrow_svo}"
                 )
                 prev_rewards[idx] = avg_rewards[idx]
-                prev_entropy[idx] = avg_entropy[idx]
-                prev_qdelta[idx]  = avg_qdelta[idx]
                 prev_svo_reward[idx] = svo_reward[idx]
 
-    print(f"Agents collided {collisions} times in {num_test} episodes.")
+                reward_ep = np.zeros(n_agents)
+
+            tqdm.write(f"Agents collided {collisions} times")
+            collisions = 0
 
     for agent in agents:
         tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
@@ -287,7 +254,7 @@ def scenario_init(scenario) -> None:
     
     if scenario == "2_agent_right_turn":
         return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
-                Agent(agent_n = 2, route = routes['4'], phi = math.pi / 3, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
     if scenario == "3_agent_right_turn":
         return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
