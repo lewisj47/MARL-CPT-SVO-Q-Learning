@@ -17,7 +17,7 @@ args = parser.parse_args()
 # Start States
 start_state_1 = (13, 3, 1)
 start_state_2 = (13, 7, 0)
-start_state_3 = (3, 10, 2)
+start_state_3 = (2, 10, 2)
 start_state_4 = (5, 10, 2)
 
 # End Goals
@@ -35,7 +35,7 @@ turn_2 = [(13, 7), (13, 8), (13, 9), (13, 10), (14, 10)]
 
 route_3 = [(c, 10) for c in range(0, 24)]
 
-route_4 = [(c, 10) for c in range(4, 24)]
+route_4 = [(c, 10) for c in range(0, 24)]
 
 # Dictionary indexed by route number containing the route, end goal, and start state
 routes = {}
@@ -316,7 +316,7 @@ def scenario_init(scenario) -> None:
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
     if scenario == "3_agent_right_turn":
-        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
                 Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
                 ])
@@ -811,7 +811,12 @@ class FlatGridWorld:
 
         for agent in self.agents:
             x, y = agent.state[0], agent.state[1]
-            plt.text(x, y, str(agent.agent_n), ha='center', va='center', fontsize=8, color='white')
+            if agent.agent_n == 1:
+                grid[(x,y)] = 0.2
+            if agent.agent_n == 2:
+                grid[(x,y)] = 0.7
+            if agent.agent_n == 3:
+                grid[(x,y)] = 1.8
 
         # Display the number of ticks occurring in an episode
         plt.text(0.05, 0.05, f"Ticks: {t}", 
@@ -819,8 +824,8 @@ class FlatGridWorld:
                  fontsize=10, color='black', 
                  verticalalignment='bottom', horizontalalignment='left')
 
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
-        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', 'yellow'])
+        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
         plt.imshow(grid.T, cmap=cmap, norm=norm)
@@ -831,6 +836,7 @@ class FlatGridWorld:
         plt.axvline(ymin = 0.65, x= 11.5, color='yellow', linestyle='--')
         plt.axvline(ymax = 0.35, x = 11.5, color='yellow', linestyle='--')
         plt.axhline(y=8, xmin=0.5, xmax=0.65, color='white', linestyle='-')
+        plt.axhline(y=15, xmin = 0.35, xmax = 0.5, color='white', linestyle='-')
 
         ax = plt.gca()
         ax.invert_yaxis()
