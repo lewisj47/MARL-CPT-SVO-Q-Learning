@@ -82,7 +82,6 @@ decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsil
 t = 0       # t used to measure the number of ticks in a single episode
 lr = 0.2    # learning rate (alpha)
 
-
 def main() -> None:
     """Initializes agents and environment and then runs a series of training episodes where agents develop 
     a Q-learning policy to reach their goal state quickly while avoiding collisions. Finally, the program 
@@ -124,119 +123,179 @@ def main() -> None:
     # Mid Altruistic: phi = pi/4
     # Purely Egoistic: phi = 0
 
+    # All agent parameters are pre-set by the scenario argument passed through the terminal
     agents = scenario_init(args.scenario)
     
     env.agents = agents
     n_agents = len(agents)
 
-    #Initializing global state
-    env.global_state = [agent.state for agent in sorted(agents, key = lambda ag: ag.agent_n)]
+    # Initialize global state
+    env.global_state = [agent.state for agent in sorted(agents, key=lambda ag: ag.agent_n)]
 
+    # Initialize lists and arrays
     avg_rewards = [0] * n_agents
     avg_other = [0] * n_agents
     svo_reward = [0] * n_agents
-
-    reward_ep = np.zeros(n_agents)
-    
     prev_rewards = [0] * n_agents
+    prev_other = [0] * n_agents
     prev_svo_reward = [0] * n_agents
 
-    for i in tqdm(range(num_episodes + num_test), mininterval = 5.0):
-        for agent in agents:
-            agent.reset()                               #Reset agent states
+    # Rolling buffer for 100-episode averages
+    reward_window = np.zeros((n_agents, 100))
+    window_index = 0
 
+    # Run training and test episodes 
+    for i in tqdm(range(num_episodes + num_test), mininterval=5.0):
+
+        # Reset per-episode rewards
+        episode_rewards = np.zeros(n_agents)
+
+        # Reset agent states
+        for agent in agents:
+            agent.reset()
+
+        # Track order of goal arrivals in test episodes
+        goal_order = []
+        goal_seen = set()
+
+        
+
+        # Reset certain variables for test episodes
         if i >= num_episodes:
             if i == num_episodes:
                 tqdm.write(f"Agents collided {collisions} times in {i} episodes.")            
                 tqdm.write("Training complete. Starting testing...")
                 collisions = 0
+                # Reset baselines so test arrows compare against test history only
+                prev_rewards = [0] * n_agents
+                prev_other = [0] * n_agents
+                prev_svo_reward = [0] * n_agents
+            # No more learning or exploration
             lr = 0
             epsilon = 0
         
+        # Episode runs until terminal state is reached
         while True:
             actions = {}
-            for agent in agents:
-                
-                if ((agent.state[0], agent.state[1]) in agent.route["End Goal"]):
-                    continue
 
-                action = agent.getAction(env.global_state, epsilon)       #Get an action for agent i
-                if action is None:
-                    continue
+            # Get actions for each agent
+            for agent in agents:
+                in_goal = ((agent.state[0], agent.state[1]) in agent.route["End Goal"])
                 
+                # Track order agents reach goal
+                if i >= num_episodes and in_goal and agent.agent_n not in goal_seen:
+                    goal_seen.add(agent.agent_n)
+                    goal_order.append(agent.agent_n)
+
+                if in_goal:
+                    continue # no action if already finished
+
+                action = agent.getAction(env.global_state, epsilon)
+                if action is None:
+                    continue   
                 actions[agent] = action
 
+            # Update Q-values using Bellman update with CPT reward distortion and SVO reward weighting
             for agent, action in actions.items():
-                agent.updateQ(env.global_state, action)   # <-- ΔQ from updateQ
+                agent.updateQ(env.global_state, action) 
 
+            # Update agent positions
             next_states = env.updateWorld(actions)
-
+            
+            # Tally cumulative reward 
             for agent, action in actions.items():
                 s_prime = next_states[agent]
-                predicted_global_state = env.global_state
-                if i < num_episodes:
-                    reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state)
-                else:
-                    reward_ep[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, predicted_global_state, log=True)
+                global_state = env.global_state
+                episode_rewards[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, global_state)
 
-                    tqdm.write(f"SVO Reward for Agent {agent.agent_n}: {svo_reward[agent.agent_n - 1]} \n")
-            
-            if i > num_episodes:
+            # Only visualize if in test episode 
+            if i >= num_episodes:
                 env.render()                #Render in visualization
-
-                #Show the visualization
                 plt.ion()                   #Activate interactive mode
                 plt.show()                  #Show visualization
                 plt.pause(0.2)              #Pause between episodes in seconds
 
+            if i >= num_episodes:
+                for ag in agents:
+                    if ((ag.state[0], ag.state[1]) in ag.route["End Goal"]) and (ag.agent_n not in goal_seen):
+                        goal_seen.add(ag.agent_n)
+                        goal_order.append(ag.agent_n)
+                        
             all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)      
 
+            # Terminal state: collision occurs
             if hasCollided(env.global_state):
                 collisions += 1
                 t = 0
                 break
 
+            # Terminal state: all at end goal
             if all_finished:
                 t = 0
                 break
-                
+
+        # If training, update epsilon using the decay rate constant
         if i < num_episodes:
-            epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) #Update epsilon according to decay rate
+            epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) 
 
-        for idx in range(n_agents):
-            avg_rewards[idx] = reward_ep[idx] / 100 
+        # Update rolling buffer with this episode's rewards
+        reward_window[:, window_index] = episode_rewards
+        window_index = (window_index + 1) % 100
 
+        if i < num_episodes:
+            # Training: average over last 100 episodes
+            avg_rewards = reward_window.mean(axis=1)
+        else:
+            # Testing: use flat totals (no averaging)
+            avg_rewards = episode_rewards.copy()
 
-        if ((i + 1) % 100) == 0 or i > num_episodes:
+        if ((i + 1) % 100) == 0 or i >= num_episodes:
             if n_agents > 1:
                 total_avg = sum(avg_rewards)
                 for n in range(n_agents):
-                    avg_other[n] = (total_avg - avg_rewards[n]) / (n_agents - 1)
+                    avg_other[n] = (total_avg - avg_rewards[n]) / (n_agents - 1)    # Extract avg other reward from total avg
             else:
                 avg_other = np.zeros(n_agents)
 
             for idx in range(n_agents):
+                # Weighted SVO reward: own reward * cos(phi) + other reward * sin(phi)
                 svo_reward[idx] = (avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi))
 
             tqdm.write(f"Episode {i + 1}:")
 
             for idx in range(n_agents):
                 arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
+                arrow_other = trend_arrow(avg_other[idx], prev_other[idx], higher_is_better=True)
                 arrow_svo = trend_arrow(svo_reward[idx], prev_svo_reward[idx], higher_is_better=True)
 
-                tqdm.write(
-                    f"Agent {idx+1} | "
-                    f"reward={avg_rewards[idx]:.2f}{arrow_r}, "
-                    f"Other Reward: {avg_other[idx]:.2f} | "
-                    f"Total Weighted Reward: {avg_rewards[idx]:.2f} * cos({(agents[idx].phi):.2f}) + {avg_other[idx]:.2f} * sin({(agents[idx].phi):.2f}) = {(avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi)):.2f}{arrow_svo}"
-                )
-                prev_rewards[idx] = avg_rewards[idx]
-                prev_svo_reward[idx] = svo_reward[idx]
-
-                reward_ep = np.zeros(n_agents)
+                if i < num_episodes:
+                    tqdm.write(
+                        f"Agent {idx+1} | "
+                        f"Average Reward={avg_rewards[idx]:.2f}{arrow_r} | "
+                        f"Avg Other Reward: {avg_other[idx]:.2f}{arrow_other} | "
+                        f"Total Weighted Reward: {svo_reward[idx]:.2f}{arrow_svo} (phi: {agents[idx].phi})"
+                    )
+                    prev_rewards[idx] = avg_rewards[idx]
+                    prev_other[idx] = avg_other[idx]
+                    prev_svo_reward[idx] = svo_reward[idx]
+                
+                else:
+                    tqdm.write(
+                        f"Agent {idx+1} | "
+                        f"Cumulative Reward={avg_rewards[idx]:.2f} | "
+                        f"Avg Other Reward: {avg_other[idx]:.2f} | "
+                        f"Total Weighted Reward: {svo_reward[idx]:.2f} (phi: {agents[idx].phi})"
+                    )
 
             tqdm.write(f"Agents collided {collisions} times")
             collisions = 0
+
+            # Print order that agents reach goal
+            if i >= num_episodes:
+                if goal_order:
+                    tqdm.write(f"Goal order this episode: {goal_order}")
+                else:
+                    tqdm.write("No agents reached their goals this episode.")
 
     for agent in agents:
         tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
@@ -259,7 +318,7 @@ def scenario_init(scenario) -> None:
     if scenario == "3_agent_right_turn":
         return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
-                Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
                 ])
 
 def trend_arrow(current, previous, higher_is_better=True):
@@ -641,7 +700,7 @@ def rewardFunction(agent, state, action, global_state, log = False) -> float:
               f"  Tailing: -{tailing_penalty},\n"
               f"  Bubble: -{bubble_penalty},\n"
               f"  Not Moving: -{not_moving_penalty}\n"
-              f"}} | Total Reward: {total_reward} \n")
+              f"}} | Step Reward: {total_reward} \n")
         
     return total_reward
 
@@ -752,7 +811,7 @@ class FlatGridWorld:
 
         for agent in self.agents:
             x, y = agent.state[0], agent.state[1]
-            plt.text(x, y, str.agent.agent_n, ha='center', va='center', fontsize=8, color='white')
+            plt.text(x, y, str(agent.agent_n), ha='center', va='center', fontsize=8, color='white')
 
         # Display the number of ticks occurring in an episode
         plt.text(0.05, 0.05, f"Ticks: {t}", 
@@ -927,7 +986,7 @@ class Agent:
             return action
 
 
-    def updateQ(self, global_state, action) -> float:
+    def updateQ(self, global_state, action) -> None:
         """Uses the Bellman equation to update the Q-value for a given global state and action.
 
         Args:
@@ -936,7 +995,7 @@ class Agent:
             action (int): The action (-1, 0, 1) chosen by the agent.
 
         Returns:
-            delta (float): Absolute value of the change between the previous Q-value and new Q-value.
+            None
         """
 
         # Create a list of potential total returns for the taken action and predicted next global states
@@ -949,14 +1008,10 @@ class Agent:
 
         # Blend predicted return (target) with current Q-value to update the Q-value for the global state and action
         new_q = ((1 - lr) * current_q) + (lr * target)
-        delta = abs(new_q - current_q)
         state_key = tuple(global_state)
         if state_key not in self.qtable:
             self.qtable[state_key] = {}
         self.qtable[state_key][action] = new_q
-
-        # Return the absolute value of the difference between old and new Q-values to be used to observe agent learning trends
-        return delta
 
 
     def sample_outcomes(self, action, n_samples=50) -> list:
