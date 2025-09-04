@@ -18,7 +18,7 @@ args = parser.parse_args()
 start_state_1 = (13, 3, 1)
 start_state_2 = (13, 7, 0)
 start_state_3 = (2, 10, 2)
-start_state_4 = (5, 10, 2)
+start_state_4 = (4, 10, 2)
 
 # End Goals
 end_goal_1 = []
@@ -157,8 +157,6 @@ def main() -> None:
         # Track order of goal arrivals in test episodes
         goal_order = []
         goal_seen = set()
-
-        
 
         # Reset certain variables for test episodes
         if i >= num_episodes:
@@ -316,10 +314,11 @@ def scenario_init(scenario) -> None:
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
     if scenario == "3_agent_right_turn":
-        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
-                Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env)
+                Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
+# lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88
 
 def trend_arrow(current, previous, higher_is_better=True):
     """Uses the colorama library to create an arrow with direction and color determined by the relationship between two passed values.
@@ -675,11 +674,11 @@ def rewardFunction(agent, state, action, global_state, log = False) -> float:
     
     # Reward weights
     const1 = 40     # Reward for reaching the goal
-    const2 = 100     # Penalty for colliding with another agent
-    const3 = 0.25    # Penalty per move
+    const2 = 100    # Penalty for colliding with another agent
+    const3 = 0.25   # Penalty per move
     const4 = 5      # Penalty for tailing another agent
     const5 = 0.5    # Penalty for being within 2 squares of another agent 
-    const6 = 2    # Penalty for not moving
+    const6 = 1      # Penalty for not moving
 
     # Reward weighting
     goal_reward = const1 * Goal(state, route)
