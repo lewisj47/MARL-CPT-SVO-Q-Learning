@@ -5,7 +5,10 @@ import argparse
 import random
 import math
 from tqdm import tqdm
+from time import sleep
+import msvcrt
 from colorama import Fore, Style
+from keyboard import on_press_key
 
 # Arguments passed from command terminal
 parser = argparse.ArgumentParser()
@@ -71,6 +74,8 @@ SIZE = 24
 num_episodes = args.episodes
 num_test = args.testepisodes
 
+paused = False
+
 #Constants
 discount = 0.95
 max_epsilon = 1.0
@@ -107,6 +112,8 @@ def main() -> None:
     global t
     global lr
     global n_agents
+    global paused
+    global reached_goal
 
     # Local Variables
     epsilon = 1
@@ -129,6 +136,8 @@ def main() -> None:
     env.agents = agents
     n_agents = len(agents)
 
+    reached_goal = [False] * n_agents
+
     # Initialize global state
     env.global_state = [agent.state for agent in sorted(agents, key=lambda ag: ag.agent_n)]
 
@@ -145,7 +154,9 @@ def main() -> None:
     window_index = 0
 
     # Run training and test episodes 
-    for i in tqdm(range(num_episodes + num_test), mininterval=5.0):
+    for i in tqdm(range(num_episodes + num_test)):
+        
+        reached_goal = [False] * n_agents
 
         # Reset per-episode rewards
         episode_rewards = np.zeros(n_agents)
@@ -174,6 +185,11 @@ def main() -> None:
         
         # Episode runs until terminal state is reached
         while True:
+            # Pause Simulation by pressing 'p'
+            #Loop for pausing simulation
+            while paused:
+                sleep(0.1)
+            
             actions = {}
 
             # Get actions for each agent
@@ -297,7 +313,12 @@ def main() -> None:
 
     for agent in agents:
         tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
-    
+
+
+def toggle_pause(e):
+    global paused
+    paused = not paused
+    tqdm.write("Paused" if paused else "Resumed")
 
 def scenario_init(scenario) -> None:
     """Initializes the agent parameters according to the scenario argument.
@@ -310,7 +331,7 @@ def scenario_init(scenario) -> None:
     """
     
     if scenario == "2_agent_right_turn":
-        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
     if scenario == "3_agent_right_turn":
@@ -668,11 +689,12 @@ def rewardFunction(agent, state, action, global_state, log = False) -> float:
     Returns:
         total_reward (float): The summation of all penalties and rewards associated with the agent's action and the global state.
     """
-    
+    global reached_goal
     global t
     route = agent.route
     
     # Reward weights
+
     const1 = 40     # Reward for reaching the goal
     const2 = 100    # Penalty for colliding with another agent
     const3 = 0.25   # Penalty per move
@@ -681,6 +703,12 @@ def rewardFunction(agent, state, action, global_state, log = False) -> float:
     const6 = 1      # Penalty for not moving
 
     # Reward weighting
+    #if (reached_goal[agent.agent_n - 1] == False and Goal(state, route) == 1):
+       # goal_reward = const1
+     #   reached_goal[agent.agent_n - 1] = True
+    #else:
+        #goal_reward = 0
+
     goal_reward = const1 * Goal(state, route)
     collision_penalty = const2 * collisionCheck(agent, state, global_state)
     move_penalty = round(const3 * t, 2)
@@ -1198,5 +1226,6 @@ class Agent:
 
         return random.choice(best_actions) # random choice in case of Q-value tie
 
+on_press_key("`", toggle_pause)
 
 main()
