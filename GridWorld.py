@@ -86,6 +86,7 @@ decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsil
 #Global Variables
 t = 0       # t used to measure the number of ticks in a single episode
 lr = 0.2    # learning rate (alpha)
+ISTESTING = False
 
 def main() -> None:
     """Initializes agents and environment and then runs a series of training episodes where agents develop 
@@ -114,6 +115,7 @@ def main() -> None:
     global n_agents
     global paused
     global reached_goal
+    global ISTESTING
 
     # Local Variables
     epsilon = 1
@@ -122,13 +124,6 @@ def main() -> None:
     # Environment object that is updated and rendered
     env = FlatGridWorld(size=SIZE, agents=[])
     global agents
-
-    # Agent profile characteristics
-    # Timid agent: lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, beta, alpha = 0.88
-    # Expectation agent: lamda = 1, gamma_gain = 1, gamma_loss = 1, beta, alpha = 1
-    # Purely Altruistic: phi = pi/2
-    # Mid Altruistic: phi = pi/4
-    # Purely Egoistic: phi = 0
 
     # All agent parameters are pre-set by the scenario argument passed through the terminal
     agents = scenario_init(args.scenario)
@@ -155,6 +150,9 @@ def main() -> None:
 
     # Run training and test episodes 
     for i in tqdm(range(num_episodes + num_test)):
+        
+        if i >= num_episodes:
+            ISTESTING = True
         
         reached_goal = [False] * n_agents
 
@@ -185,8 +183,8 @@ def main() -> None:
         
         # Episode runs until terminal state is reached
         while True:
-            # Pause Simulation by pressing 'p'
-            #Loop for pausing simulation
+            # Pause Simulation by pressing '~' key
+            # Loop for pausing simulation
             while paused:
                 sleep(0.1)
             
@@ -320,6 +318,7 @@ def toggle_pause(e):
     paused = not paused
     tqdm.write("Paused" if paused else "Resumed")
 
+
 def scenario_init(scenario) -> None:
     """Initializes the agent parameters according to the scenario argument.
 
@@ -335,11 +334,12 @@ def scenario_init(scenario) -> None:
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
     if scenario == "3_agent_right_turn":
-        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
-                Agent(agent_n = 3, route = routes['3'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                Agent(agent_n = 3, route = routes['3'], phi = math.pi / 3, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
 # lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88
+
 
 def trend_arrow(current, previous, higher_is_better=True):
     """Uses the colorama library to create an arrow with direction and color determined by the relationship between two passed values.
@@ -550,8 +550,7 @@ def proximityCheck(agent, state, global_state):
         global_state (list of tuples): the state of each agent.
     
     Returns:
-        penalty (float): 1.0 for within 1 square, 0.25 for within 2 squares.
-        
+        penalty (float): 1.0 for within 1 square, 0.25 for within 2 squares
     """
     
     # Ensure no penalty if agent already in goal
@@ -638,7 +637,6 @@ def collisionCheck(agent, state, global_state) -> int:
         int: 1 if collision has occurred, 0 otherwise.
     """
 
-
     x, y, sp = state
     route = agent.route["Route"]
 
@@ -699,7 +697,7 @@ def rewardFunction(agent, state, action, global_state, log = False) -> float:
     const2 = 100    # Penalty for colliding with another agent
     const3 = 0.25   # Penalty per move
     const4 = 5      # Penalty for tailing another agent
-    const5 = 0.5    # Penalty for being within 2 squares of another agent 
+    const5 = 0.5    # Penalty for being within 2 squares of another agent
     const6 = 1      # Penalty for not moving
 
     # Reward weighting
@@ -1117,18 +1115,27 @@ class Agent:
             self_reward = rewardFunction(self, predicted_global_state[self.agent_n - 1], action, predicted_global_state)
 
             other_rewards = 0.0
+            contributors = 0
+
             # Compute total rewards for all other agents
             for ag in ordered_agents:
                 if ag is self:
                     continue    # Only look at other agents
-                r = rewardFunction(ag, predicted_global_state[ag.agent_n - 1], actions_by_id.get(ag.agent_n), predicted_global_state)
+
+                predicted_next = predicted_global_state[ag.agent_n - 1]
+                predicted_next_pos = (predicted_next[0], predicted_next[1])
+                goal_state = ag.route["End Goal"]
+
+                # If the agent is in its goal and didn't only just reach it, don't count its reward for the average other reward
+                if predicted_next_pos in goal_state and (ag.state[0], ag.state[1]) in goal_state:
+                    r = 0
+                else:
+                    r = rewardFunction(ag, predicted_next, actions_by_id.get(ag.agent_n), predicted_global_state)
+                    contributors += 1   # Increase tally for the number of agents contributing to the average other reward 
                 other_rewards += r
-            
+
             # Compute average other agent reward
-            if len(self.env.agents) > 1:
-                avg_other_reward = other_rewards / (len(self.env.agents) - 1)
-            else:
-                avg_other_reward = 0.0
+            avg_other_reward = other_rewards / contributors if contributors > 0 else 0.0
             
             # Compute total weighted utility using SVO
             weighted_joint_reward = math.cos(self.phi) * self_reward + math.sin(self.phi) * avg_other_reward
