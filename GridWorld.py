@@ -6,7 +6,6 @@ import random
 import math
 from tqdm import tqdm
 from time import sleep
-import msvcrt
 from colorama import Fore, Style
 from keyboard import on_press_key
 
@@ -133,6 +132,14 @@ def main() -> None:
 
     reached_goal = [False] * n_agents
 
+    # --- Testing accumulators ---
+    # Count of test episodes that experienced at least one collision
+    test_collision_episodes = 0
+    # Counts of observed goal arrival orders (tuple of agent indices -> occurrences)
+    test_goal_order_counts = {}
+    # Sum of total weighted rewards (SVO) per agent across all test episodes
+    test_weighted_reward_sums = np.zeros(n_agents)
+
     # Initialize global state
     env.global_state = [agent.state for agent in sorted(agents, key=lambda ag: ag.agent_n)]
 
@@ -153,8 +160,10 @@ def main() -> None:
         
         if i >= num_episodes:
             ISTESTING = True
-        
         reached_goal = [False] * n_agents
+
+        # Per-episode test flags
+        collision_occurred = False
 
         # Reset per-episode rewards
         episode_rewards = np.zeros(n_agents)
@@ -170,9 +179,10 @@ def main() -> None:
         # Reset certain variables for test episodes
         if i >= num_episodes:
             if i == num_episodes:
-                tqdm.write(f"Agents collided {collisions} times in {i} episodes.")            
                 tqdm.write("Training complete. Starting testing...")
                 collisions = 0
+                # Reset any testing accumulators so they reflect testing-only history
+                test_weighted_reward_sums = np.zeros(n_agents)
                 # Reset baselines so test arrows compare against test history only
                 prev_rewards = [0] * n_agents
                 prev_other = [0] * n_agents
@@ -227,7 +237,7 @@ def main() -> None:
                 plt.show()                  #Show visualization
                 plt.pause(0.2)              #Pause between episodes in seconds
 
-            if i >= num_episodes:
+                # Track the order that agents reach their goal states
                 for ag in agents:
                     if ((ag.state[0], ag.state[1]) in ag.route["End Goal"]) and (ag.agent_n not in goal_seen):
                         goal_seen.add(ag.agent_n)
@@ -238,6 +248,9 @@ def main() -> None:
             # Terminal state: collision occurs
             if hasCollided(env.global_state):
                 collisions += 1
+                # Mark this episode as having a collision (for testing accumulators)
+                if i >= num_episodes:
+                    collision_occurred = True
                 t = 0
                 break
 
@@ -262,16 +275,22 @@ def main() -> None:
             avg_rewards = episode_rewards.copy()
 
         if ((i + 1) % 100) == 0 or i >= num_episodes:
-            if n_agents > 1:
-                total_avg = sum(avg_rewards)
-                for n in range(n_agents):
-                    avg_other[n] = (total_avg - avg_rewards[n]) / (n_agents - 1)    # Extract avg other reward from total avg
-            else:
-                avg_other = np.zeros(n_agents)
-
+            # Update goal order counts (use tuple as dict key)
+            if goal_order:
+                key = tuple(goal_order)
+                test_goal_order_counts[key] = test_goal_order_counts.get(key, 0) + 1
+            total_avg = sum(avg_rewards)
             for idx in range(n_agents):
+                if n_agents > 1:
+                    avg_other[idx] = (total_avg - avg_rewards[idx]) / (n_agents - 1)    # Extract avg other reward from total avg
+                else:
+                    avg_other[idx] = 0.0
                 # Weighted SVO reward: own reward * cos(phi) + other reward * sin(phi)
                 svo_reward[idx] = (avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi))
+                test_weighted_reward_sums[idx] += svo_reward[idx]
+            # Tally number of episodes where at least one collision occurs
+            if collision_occurred:
+                test_collision_episodes += 1
 
             tqdm.write(f"Episode {i + 1}:")
 
@@ -312,8 +331,35 @@ def main() -> None:
     for agent in agents:
         tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
 
+    # Final testing summary
+    if num_test > 0:
+        tqdm.write("\n--- Testing Summary ---")
+        tqdm.write(f"Test episodes: {num_test}")
+        tqdm.write(f"Test episodes with at least one collision: {test_collision_episodes}")
 
-def toggle_pause(e):
+        if test_goal_order_counts:
+            tqdm.write("Observed goal orders and counts:")
+            for order, cnt in sorted(test_goal_order_counts.items(), key=lambda x: -x[1]):
+                tqdm.write(f" Order {list(order)} occurred {cnt} times")
+        else:
+            tqdm.write("No goal orders observed during testing.")
+
+        # Average weighted reward per agent across test episodes
+        avg_weighted_rewards = test_weighted_reward_sums / num_test if num_test > 0 else np.zeros(n_agents)
+        for idx, val in enumerate(avg_weighted_rewards):
+            tqdm.write(f"Agent {idx+1} average total weighted reward (testing): {val:.3f}")
+
+
+def toggle_pause(e) -> None:
+    """Toggles the paused state when the '~' key is pressed.
+
+    Args:
+        e: Key event (not used).
+
+    Returns:
+        None
+    """
+    
     global paused
     paused = not paused
     tqdm.write("Paused" if paused else "Resumed")
@@ -336,9 +382,8 @@ def scenario_init(scenario) -> None:
     if scenario == "3_agent_right_turn":
         return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
                 Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
-                Agent(agent_n = 3, route = routes['3'], phi = math.pi / 3, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                Agent(agent_n = 3, route = routes['3'], phi = math.pi / 4, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
                 ])
-# lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88
 
 
 def trend_arrow(current, previous, higher_is_better=True):
@@ -428,13 +473,23 @@ def hasCollided(global_state) -> bool:
     
     # Check edge case for when one agent 'jumps' over another without ever occupying the same space
     for state in global_state:
-        for _ , route in routes.items():
-            if (state[0], state[1]) in route["Route"]:
-                idx = route["Route"].index((state[0], state[1]))
+        pos = (state[0], state[1])
+        # Skip positions that are goal cells
+        if pos in goal_cells:
+            continue
+        for _, route in routes.items():
+            if pos in route["Route"]:
+                idx = route["Route"].index(pos)
                 if idx + 1 < len(route["Route"]):
-                    if (state[2] == 2 and any((route["Route"][idx + 1][0], route["Route"][idx + 1][1], s) in global_state for s in (0, 1))):
+                    next_pos = route["Route"][idx + 1]
+                    # If the next position is a goal cell, don't count jump-over into it as a collision
+                    if next_pos in goal_cells:
+                        continue
+                    # If this agent is moving two steps (speed==2) and any agent occupies the next
+                    # route cell at speed 0 or 1, that counts as a jump-over collision.
+                    if state[2] == 2 and any((next_pos[0], next_pos[1], s) in global_state for s in (0, 1)):
                         return True
-    
+
     # Collision has occurred if more than one agent have the same position
     if len(positions) != len(set(positions)):
         return True
@@ -673,7 +728,7 @@ def collisionCheck(agent, state, global_state) -> int:
     return 0
 
 
-def rewardFunction(agent, state, action, global_state, log = False) -> float:
+def rewardFunction(agent, state, action, global_state, log = False, collided_agents=None) -> float:
     """Returns the total reward given by the environment according to an agent's route, state, action, and the global state. 
 
     Args:
@@ -708,7 +763,11 @@ def rewardFunction(agent, state, action, global_state, log = False) -> float:
         #goal_reward = 0
 
     goal_reward = const1 * Goal(state, route)
-    collision_penalty = const2 * collisionCheck(agent, state, global_state)
+    # Use centralized collided_agents if provided for symmetric handling, else fallback
+    if collided_agents is not None:
+        collision_penalty = const2 if (agent.agent_n - 1) in collided_agents else 0
+    else:
+        collision_penalty = const2 * collisionCheck(agent, state, global_state)
     move_penalty = round(const3 * t, 2)
     tailing_penalty = const4 * proximityCheck(agent, state, global_state)
     bubble_penalty = const5 * bubbleCheck(agent, state, global_state)
@@ -839,18 +898,20 @@ class FlatGridWorld:
             if agent.agent_n == 1:
                 grid[(x,y)] = 0.2
             if agent.agent_n == 2:
-                grid[(x,y)] = 0.7
+                grid[(x,y)] = 2.2
             if agent.agent_n == 3:
-                grid[(x,y)] = 1.8
+                grid[(x,y)] = 2.8
 
+        """
         # Display the number of ticks occurring in an episode
         plt.text(0.05, 0.05, f"Ticks: {t}", 
                  transform=plt.gca().transAxes,  # position relative to axes (0-1)
                  fontsize=10, color='black', 
                  verticalalignment='bottom', horizontalalignment='left')
+        """
 
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', 'yellow'])
-        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2]
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', 'yellow', 'orange', 'pink'])
+        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2, 2.5, 3.5]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
         plt.imshow(grid.T, cmap=cmap, norm=norm)
