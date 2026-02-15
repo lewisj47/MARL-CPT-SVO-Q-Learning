@@ -1,360 +1,1299 @@
-#This program creates and visualizes a grid world, our ui.\
-
 import matplotlib.pyplot as plt
 from matplotlib import colors
-from matplotlib.patches import Arc
 import numpy as np
-from itertools import product
 import argparse
 import random
-from copy import deepcopy # may need to pip install
+import math
+from tqdm import tqdm
+from time import sleep
+from colorama import Fore, Style
+from keyboard import on_press_key
 
-#The parse arguments allow for arguments to be passed to the program via the command line. size can be 12, 24 or 48.
+# Arguments passed from command terminal
 parser = argparse.ArgumentParser()
-parser.add_argument("size", type = int,  help="The size of the grid environment given as a length of one of the sides.")
 parser.add_argument("episodes", type=int, help="The number of episodes to undergo during training")
+parser.add_argument("testepisodes", type=int, help="The number of episodes to undergo during testing")
+parser.add_argument("scenario", type = str, help="A string which is the name of the scenario which is being run")
 args = parser.parse_args()
 
-#This class defines the environment in which the agent will learn. There is a corresponding size given as the length of
-#one of the square worlds sides, the goal square, and an array containing the coordinates of each of the obstacles. 
-class FlatGridWorld:
-    def __init__(self, size, goal, obstacles=[]):
-        self.size = args.size  # grid is size x size
-        self.n_squares = size * size
-        self.goal = goal
-        self.obstacles = [Obs1, Obs2, Obs3]
+# Start States
+start_state_1 = (13, 3, 1)
+start_state_2 = (13, 7, 0)
+start_state_3 = (2, 10, 2)
+start_state_4 = (4, 10, 2)
 
-    #Render sets a cmap for the obstacles, agents, and road, as well as creating lines for the road. It generates the
-    #new world every time a change is made. 
-    def render(self):
+# End Goals
+end_goal_1 = []
+end_goal_2 = []
+end_goal_1.extend([(c, r) for r in range(22, 24) for c in range(12, 15)])
+end_goal_2.extend([(c, r) for r in range(9, 12) for c in range(22, 24)])
+
+# Routes
+route_1 = [(13, r) for r in range(3, 24)]
+route_2 = [(13, r) for r in range (0, 11)]
+route_2.extend([(c, 10) for c in range(14, 24)])
+
+turn_2 = [(13, 7), (13, 8), (13, 9), (13, 10), (14, 10)]
+
+route_3 = [(c, 10) for c in range(0, 24)]
+
+route_4 = [(c, 10) for c in range(0, 24)]
+
+# Dictionary indexed by route number containing the route, end goal, and start state
+routes = {}
+
+# Route 1: straight up
+routes["1"] = {"Route": route_1, "End Goal": end_goal_1, "Start State": start_state_1}
+
+# Route 2: up and right
+routes["2"] = {"Route": route_2, "End Goal": end_goal_2, "Start State": start_state_2, "Turn": turn_2}
+
+# Route 3: straight right
+routes["3"] = {"Route": route_3, "End Goal": end_goal_2, "Start State": start_state_3}
+
+# Route 4: straight right later later starting position
+routes["4"] = {"Route": route_4, "End Goal": end_goal_2, "Start State": start_state_4}
+
+allGoals = end_goal_1 + end_goal_2
+
+#Obstacles 
+totObs = []
+
+Obs1 = [(c, r) for c in range(0, 9) for r in range(0, 9)]
+totObs.extend(Obs1)
+Obs2 = [(c, r) for c in range(15, 24) for r in range(0, 9)]
+totObs.extend(Obs2)
+Obs3 = [(c, r) for c in range(15, 24) for r in range(15, 24)]
+totObs.extend(Obs3)
+Obs4 = [(c, r) for c in range (0, 9) for r in range(15, 24)]
+totObs.extend(Obs4)
+
+#Environment Definitions
+SIZE = 24
+num_episodes = args.episodes
+num_test = args.testepisodes
+
+paused = False
+
+#Constants
+discount = 0.95
+max_epsilon = 1.0
+min_epsilon = 0.05
+target_epsilon = 0.051
+decay_rate = -math.log((target_epsilon - min_epsilon) / (max_epsilon - min_epsilon)) / num_episodes # Exponential decay constant for epsilon
+
+#Global Variables
+t = 0       # t used to measure the number of ticks in a single episode
+lr = 0.2    # learning rate (alpha)
+ISTESTING = False
+
+def main() -> None:
+    """Initializes agents and environment and then runs a series of training episodes where agents develop 
+    a Q-learning policy to reach their goal state quickly while avoiding collisions. Finally, the program 
+    runs and visualizes a series of testing episodes where agents operate using their developed policy.
+
+    Episode structure:
+        1. Initialize agents.
+        2. Given current state, each agent chooses an action based on an epsilon-greedy policy.
+        3. Each agent updates its Q-table for the global state and chosen action.
+        4. The environment and true global state are updated. 
+        5. Repeat steps 2-4 until agents reach terminal state (collision or all in goals).
+        6. Repeat steps 1-5 for each episode.
+    
+    Args:
+        None
+
+    Returns:
+        None
+    """
+  
+    # Global variables
+    global env
+    global t
+    global lr
+    global n_agents
+    global paused
+    global reached_goal
+    global ISTESTING
+
+    # Local Variables
+    epsilon = 1
+    collisions = 0
+
+    # Environment object that is updated and rendered
+    env = FlatGridWorld(size=SIZE, agents=[])
+    global agents
+
+    # All agent parameters are pre-set by the scenario argument passed through the terminal
+    agents = scenario_init(args.scenario)
+    
+    env.agents = agents
+    n_agents = len(agents)
+
+    reached_goal = [False] * n_agents
+
+    # --- Testing accumulators ---
+    # Count of test episodes that experienced at least one collision
+    test_collision_episodes = 0
+    # Counts of observed goal arrival orders (tuple of agent indices -> occurrences)
+    test_goal_order_counts = {}
+    # Sum of total weighted rewards (SVO) per agent across all test episodes
+    test_weighted_reward_sums = np.zeros(n_agents)
+
+    # Initialize global state
+    env.global_state = [agent.state for agent in sorted(agents, key=lambda ag: ag.agent_n)]
+
+    # Initialize lists and arrays
+    avg_rewards = [0] * n_agents
+    avg_other = [0] * n_agents
+    svo_reward = [0] * n_agents
+    prev_rewards = [0] * n_agents
+    prev_other = [0] * n_agents
+    prev_svo_reward = [0] * n_agents
+
+    # Rolling buffer for 100-episode averages
+    reward_window = np.zeros((n_agents, 100))
+    window_index = 0
+
+    # Run training and test episodes 
+    for i in tqdm(range(num_episodes + num_test)):
+        
+        if i >= num_episodes:
+            ISTESTING = True
+        reached_goal = [False] * n_agents
+
+        # Per-episode test flags
+        collision_occurred = False
+
+        # Reset per-episode rewards
+        episode_rewards = np.zeros(n_agents)
+
+        # Reset agent states
+        for agent in agents:
+            agent.reset()
+
+        # Track order of goal arrivals in test episodes
+        goal_order = []
+        goal_seen = set()
+
+        # Reset certain variables for test episodes
+        if i >= num_episodes:
+            if i == num_episodes:
+                tqdm.write("Training complete. Starting testing...")
+                collisions = 0
+                # Reset any testing accumulators so they reflect testing-only history
+                test_weighted_reward_sums = np.zeros(n_agents)
+                # Reset baselines so test arrows compare against test history only
+                prev_rewards = [0] * n_agents
+                prev_other = [0] * n_agents
+                prev_svo_reward = [0] * n_agents
+            # No more learning or exploration
+            lr = 0
+            epsilon = 0
+        
+        # Episode runs until terminal state is reached
+        while True:
+            # Pause Simulation by pressing '~' key
+            # Loop for pausing simulation
+            while paused:
+                sleep(0.1)
+            
+            actions = {}
+
+            # Get actions for each agent
+            for agent in agents:
+                in_goal = ((agent.state[0], agent.state[1]) in agent.route["End Goal"])
+                
+                # Track order agents reach goal
+                if i >= num_episodes and in_goal and agent.agent_n not in goal_seen:
+                    goal_seen.add(agent.agent_n)
+                    goal_order.append(agent.agent_n)
+
+                if in_goal:
+                    continue # no action if already finished
+
+                action = agent.getAction(env.global_state, epsilon)
+                if action is None:
+                    continue   
+                actions[agent] = action
+
+            # Update Q-values using Bellman update with CPT reward distortion and SVO reward weighting
+            for agent, action in actions.items():
+                agent.updateQ(env.global_state, action) 
+
+            # Update agent positions
+            next_states = env.updateWorld(actions)
+            
+            # Tally cumulative reward 
+            for agent, action in actions.items():
+                s_prime = next_states[agent]
+                global_state = env.global_state
+                episode_rewards[agent.agent_n - 1] += rewardFunction(agent, s_prime, action, global_state)
+
+            # Only visualize if in test episode 
+            if i >= num_episodes:
+                env.render()                #Render in visualization
+                plt.ion()                   #Activate interactive mode
+                plt.show()                  #Show visualization
+                plt.pause(0.2)              #Pause between episodes in seconds
+
+                # Track the order that agents reach their goal states
+                for ag in agents:
+                    if ((ag.state[0], ag.state[1]) in ag.route["End Goal"]) and (ag.agent_n not in goal_seen):
+                        goal_seen.add(ag.agent_n)
+                        goal_order.append(ag.agent_n)
+                        
+            all_finished = all((agent.state[0], agent.state[1]) in agent.route["End Goal"] for agent in agents)      
+
+            # Terminal state: collision occurs
+            if hasCollided(env.global_state):
+                collisions += 1
+                # Mark this episode as having a collision (for testing accumulators)
+                if i >= num_episodes:
+                    collision_occurred = True
+                t = 0
+                break
+
+            # Terminal state: all at end goal
+            if all_finished:
+                t = 0
+                break
+
+        # If training, update epsilon using the decay rate constant
+        if i < num_episodes:
+            epsilon = min_epsilon + (max_epsilon - min_epsilon) * math.exp(-decay_rate * i) 
+
+        # Update rolling buffer with this episode's rewards
+        reward_window[:, window_index] = episode_rewards
+        window_index = (window_index + 1) % 100
+
+        if i < num_episodes:
+            # Training: average over last 100 episodes
+            avg_rewards = reward_window.mean(axis=1)
+        else:
+            # Testing: use flat totals (no averaging)
+            avg_rewards = episode_rewards.copy()
+
+        if ((i + 1) % 100) == 0 or i >= num_episodes:
+            # Update goal order counts (use tuple as dict key)
+            if goal_order:
+                key = tuple(goal_order)
+                test_goal_order_counts[key] = test_goal_order_counts.get(key, 0) + 1
+            total_avg = sum(avg_rewards)
+            for idx in range(n_agents):
+                if n_agents > 1:
+                    avg_other[idx] = (total_avg - avg_rewards[idx]) / (n_agents - 1)    # Extract avg other reward from total avg
+                else:
+                    avg_other[idx] = 0.0
+                # Weighted SVO reward: own reward * cos(phi) + other reward * sin(phi)
+                svo_reward[idx] = (avg_rewards[idx] * math.cos(agents[idx].phi) + avg_other[idx] * math.sin(agents[idx].phi))
+                test_weighted_reward_sums[idx] += svo_reward[idx]
+            # Tally number of episodes where at least one collision occurs
+            if collision_occurred:
+                test_collision_episodes += 1
+
+            tqdm.write(f"Episode {i + 1}:")
+
+            for idx in range(n_agents):
+                arrow_r = trend_arrow(avg_rewards[idx], prev_rewards[idx], higher_is_better=True)
+                arrow_other = trend_arrow(avg_other[idx], prev_other[idx], higher_is_better=True)
+                arrow_svo = trend_arrow(svo_reward[idx], prev_svo_reward[idx], higher_is_better=True)
+
+                if i < num_episodes:
+                    tqdm.write(
+                        f"Agent {idx+1} | "
+                        f"Average Reward={avg_rewards[idx]:.2f}{arrow_r} | "
+                        f"Avg Other Reward: {avg_other[idx]:.2f}{arrow_other} | "
+                        f"Total Weighted Reward: {svo_reward[idx]:.2f}{arrow_svo} (phi: {agents[idx].phi})"
+                    )
+                    prev_rewards[idx] = avg_rewards[idx]
+                    prev_other[idx] = avg_other[idx]
+                    prev_svo_reward[idx] = svo_reward[idx]
+                
+                else:
+                    tqdm.write(
+                        f"Agent {idx+1} | "
+                        f"Cumulative Reward={avg_rewards[idx]:.2f} | "
+                        f"Avg Other Reward: {avg_other[idx]:.2f} | "
+                        f"Total Weighted Reward: {svo_reward[idx]:.2f} (phi: {agents[idx].phi})"
+                    )
+
+            tqdm.write(f"Agents collided {collisions} times")
+            collisions = 0
+
+            # Print order that agents reach goal
+            if i >= num_episodes:
+                if goal_order:
+                    tqdm.write(f"Goal order this episode: {goal_order}")
+                else:
+                    tqdm.write("No agents reached their goals this episode.")
+
+    for agent in agents:
+        tqdm.write(f"Agent {agent.agent_n}: \n Phi: {agent.phi} \n Lambda: {agent.lamda} \n Gamma+ : {agent.gamma_gain} \n Gamma- : {agent.gamma_loss} ")
+
+    # Final testing summary
+    if num_test > 0:
+        tqdm.write("\n--- Testing Summary ---")
+        tqdm.write(f"Test episodes: {num_test}")
+        tqdm.write(f"Test episodes with at least one collision: {test_collision_episodes}")
+
+        if test_goal_order_counts:
+            tqdm.write("Observed goal orders and counts:")
+            for order, cnt in sorted(test_goal_order_counts.items(), key=lambda x: -x[1]):
+                tqdm.write(f" Order {list(order)} occurred {cnt} times")
+        else:
+            tqdm.write("No goal orders observed during testing.")
+
+        # Average weighted reward per agent across test episodes
+        avg_weighted_rewards = test_weighted_reward_sums / num_test if num_test > 0 else np.zeros(n_agents)
+        for idx, val in enumerate(avg_weighted_rewards):
+            tqdm.write(f"Agent {idx+1} average total weighted reward (testing): {val:.3f}")
+
+
+def toggle_pause(e) -> None:
+    """Toggles the paused state when the '~' key is pressed.
+
+    Args:
+        e: Key event (not used).
+
+    Returns:
+        None
+    """
+    
+    global paused
+    paused = not paused
+    tqdm.write("Paused" if paused else "Resumed")
+
+
+def scenario_init(scenario) -> None:
+    """Initializes the agent parameters according to the scenario argument.
+
+    Args:
+        scenario (string): Command line argument.
+
+    Returns:
+        None
+    """
+    
+    if scenario == "2_agent_right_turn":
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
+                Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                ])
+    if scenario == "3_agent_right_turn":
+        return([Agent(agent_n = 1, route = routes['2'], phi = 0, lamda = 2.5, gamma_gain = 0.61, gamma_loss = 0.69, alpha = 0.88, beta = 0.88, env=env),
+                Agent(agent_n = 2, route = routes['4'], phi = 0, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env),
+                Agent(agent_n = 3, route = routes['3'], phi = math.pi / 4, lamda = 1, gamma_gain = 1, gamma_loss = 1, alpha = 1, beta = 1, env=env)
+                ])
+
+
+def trend_arrow(current, previous, higher_is_better=True):
+    """Uses the colorama library to create an arrow with direction and color determined by the relationship between two passed values.
+
+    Args: 
+        current (float): New value to compare with the old.
+        previous (float): Old value.
+        higher_is_better (bool): Used to map the arrow color to the sign of the change in value.
+            Defaults to False.
+        
+    Returns:
+        str: String containing ANSI escape codes that appears in the terminal as a colored arrow.
+    """
+    
+    if previous is None:
+        return ""  # no arrow for first measurement
+    if current > previous:
+        return Fore.GREEN + "↑" + Style.RESET_ALL if higher_is_better else Fore.RED + "↑" + Style.RESET_ALL
+    elif current < previous:
+        return Fore.RED + "↓" + Style.RESET_ALL if higher_is_better else Fore.GREEN + "↓" + Style.RESET_ALL
+    else:
+        return Fore.YELLOW + "→" + Style.RESET_ALL
+
+
+def policy_entropy(agent, global_state, epsilon) -> float:
+    """Compute the entropy of the agent's epsilon-greedy policy given its Q-values at the current state.
+
+    Args:
+        agent (class): Specific to the agent.
+        global_state (list of tuples): The state (xpos, ypos, speed) of each agent.
+        epsilon (float): The current probability weight for exploration.
+
+    Returns:
+        float: The entropy of the policy. Should get smaller per episode.
+    """
+    
+    # Collect Q-values for all legal actions in this state.
+    legal = getLegalActions(agent.state, agent.route)
+    if not legal:
+        return 0.0
+    q_values = [agent.getQValue(global_state, a) for a in legal]
+    n = len(legal)
+    best = max(q_values)
+
+    # Construct action probabilities under epsilon-greedy policy
+    idx_best = [i for i, q in enumerate(q_values) if q ==best]
+    k = len(idx_best)
+    probs = np.full(n, epsilon / n, dtype=float)
+    if k > 0:
+        probs[idx_best] += (1.0 - epsilon) / k
+    
+    # Entropy = -∑ p log p (small offset avoids log(0))
+    return - float(np.sum(probs * np.log(probs + 1e-12)))
+
+
+def Goal(state, route) -> int:
+    """Checks if the agent is in its route's goal state.
+
+    Args:
+        state (tuple): State (xpos, ypos, speed) of the agent.
+        route (dictionary of a list of tuples): Coordinates of agent start state, route, and end state. 
+
+    Returns:
+        int: 1 if agent in goal, 0 otherwise.
+    """
+
+    if ((state[0],state[1]) in route["End Goal"]):
+        return 1
+    else:
+        return 0
+
+
+def hasCollided(global_state) -> bool:
+    """Checks if there has been any collision between agents.
+
+    Args:
+        global_state (list of tuples): The state (xpos, ypos, speed) of each agent.
+
+    Returns:
+        bool: True if a collision has occurred, False otherwise
+    """
+
+    # Do not check for collision in goal states
+    goal_cells = set().union(*[set(info["End Goal"]) for info in routes.values()])
+    positions = [(state[0], state[1]) for state in global_state if (state[0], state[1]) not in goal_cells]
+    
+    # Check edge case for when one agent 'jumps' over another without ever occupying the same space
+    for state in global_state:
+        pos = (state[0], state[1])
+        # Skip positions that are goal cells
+        if pos in goal_cells:
+            continue
+        for _, route in routes.items():
+            if pos in route["Route"]:
+                idx = route["Route"].index(pos)
+                if idx + 1 < len(route["Route"]):
+                    next_pos = route["Route"][idx + 1]
+                    # If the next position is a goal cell, don't count jump-over into it as a collision
+                    if next_pos in goal_cells:
+                        continue
+                    # If this agent is moving two steps (speed==2) and any agent occupies the next
+                    # route cell at speed 0 or 1, that counts as a jump-over collision.
+                    if state[2] == 2 and any((next_pos[0], next_pos[1], s) in global_state for s in (0, 1)):
+                        return True
+
+    # Collision has occurred if more than one agent have the same position
+    if len(positions) != len(set(positions)):
+        return True
+    else:
+        return False
+
+
+def neighboringStates(state, route) -> list:
+    """Returns all possible next states for an agent given their current state and route.
+
+    Args:
+        state (tuple): State (xpos, ypos, speed) of the agent.
+        route (dictionary of a list of tuples): Coordinates of agent start state, route, and end state. 
+    
+    Returns:
+        valid (list): List of all possible next states.
+    """
+
+    valid = []
+    route_list = route["Route"]
+
+    # Precompute coordinate -> index map
+    route_index = {pos: i for i, pos in enumerate(route_list)}
+
+    # If in goal, no next states
+    if (state[0], state[1]) in route["End Goal"]:
+        return valid
+
+    # Only process if current position is on the route
+    if (state[0], state[1]) in route_index:
+        idx = route_index[(state[0], state[1])]
+        speed = state[2]
+
+        # Speed 0: stay or start moving
+        if speed == 0:
+            for s in (0, 1):
+                valid.append((state[0], state[1], s))
+
+        # Speed > 0: move forward that many steps
+        else:
+            step = min(speed, len(route_list) - 1 - idx)
+            for next_s in range(max(0, speed - 1), 3):  
+                next_idx = idx + step
+                if next_idx < len(route_list):
+                    next_r, next_c = route_list[next_idx]
+                    valid.append((next_r, next_c, next_s))
+
+    # If state is within a turn within its route, restrict next speed to 0 or 1
+    if "Turn" in route and (state[0], state[1]) in route["Turn"]:
+        valid = [v for v in valid if v[2] != 2]
+
+    # Filter valid states: must be on the route
+    route_coords = set(route_list)
+    valid = [i for i in valid if (i[0], i[1]) in route_coords]
+
+    return valid
+
+
+def getLegalActions(state, route) -> list:
+    """Returns a list of all legal actions depending on a state and a route.
+
+    Args:
+        state (tuple): State (xpos, ypos, speed) of the agent.
+        route (dictionary of a list of tuples): Coordinates of agent start state, route, and end state. 
+
+    Returns:
+        list: The set of all legal actions for the state. Can be slow down (-1), speed up (1), or stay the same speed (0).
+    """
+    
+    x, y, s = state
+    # If the state exists within a turn on the passed route, don't allow the agent to speed up
+    if "Turn" in route and (x, y) in route["Turn"]:
+        if s == 0:
+            return [0, 1]
+        if s == 1:
+            return [-1, 0]
+        if s == 2:
+            return [-1]
+
+    if s == 0:
+        return [0, 1]   # Cannot slow down if stopped
+    
+    elif s == 1:
+        return [-1, 0, 1]
+
+    elif s == 2:
+       return [-1, 0]   # Cannot speed up if going max speed
+    
+
+def notMoving(state, action) -> int:
+    """Checks if the agent is not moving (has speed 0 and chooses action 0).
+
+    Args:
+        state (tuple): State (xpos, ypos, speed) of the agent.
+        action (int): The action the agent has chosen to take (-1, 0, 1).
+    
+    Returns:
+        int: 1 if the agent is not moving, 0 otherwise.
+    """
+
+    if state[2] == 0 and action == 0:
+        return 1
+    else:
+        return 0
+
+    
+def proximityCheck(agent, state, global_state):
+    """Checks if the agent is directly behind another agent (tailgating behavior).
+    
+    Args:
+        agent (class): Specific to the agent.
+        state (tuple): State (xpos, ypos, speed) of that agent.
+        global_state (list of tuples): the state of each agent.
+    
+    Returns:
+        penalty (float): 1.0 for within 1 square, 0.25 for within 2 squares
+    """
+    
+    # Ensure no penalty if agent already in goal
+    if Goal(state, agent.route):
+        return 0.0
+    
+    route = agent.route["Route"]
+    x, y, _ = state
+    for idx, entry in enumerate(route):
+        if entry == (x, y):
+            # Define next two coord pairs on agent's route
+            adj_one = route[idx + 1] if idx + 1 < len(route) else None
+            adj_two = route[idx + 2] if idx + 2 < len(route) else None
+            break
+
+    penalty = 0.0
+
+    # Check if another agent is right in front of the agent
+    for idx, s in enumerate(global_state):
+        if idx == agent.agent_n - 1:
+            continue    # Skip self
+        ox, oy, _ = s
+        other_agent = agent.env.agents[idx]
+        if Goal(s, other_agent.route):
+            continue    # Don't count as tailing if other agent is in their goal
+        if (ox, oy) == adj_one:
+            penalty = max(penalty, 1.0)
+        elif (ox, oy) == adj_two:
+            penalty = max(penalty, 0.25)
+
+    return penalty 
+
+
+def bubbleCheck(agent, state, global_state) -> float:
+    """Checks if any other agents are within 1 or 2 squares in any direction.
+
+    Args:
+        agent (class): Specific to the agent.
+        state (tuple): State (xpos, ypos, speed) of that agent.
+        global_state (list of tuples): the state of each agent.
+    
+    Returns:
+        penalty (float): 1.0 for within 1 square, 0.5 for within 2 squares.
+    
+    """
+    
+    # Ensure no penalty if agent already in goal
+    if Goal(state, agent.route):
+        return 0.0
+    
+    x, y, _ = state
+
+    # Capture all states within 1 or 2 xpos or ypos steps from the agent
+    bubble_1 = [(x+i, y+j, s) for i in range(-1, 2) for j in range(-1, 2) for s in (0, 1, 2)]
+    bubble_2 = [(x+i, y+j, s) for i in range(-2, 3) for j in range(-2, 3) for s in (0, 1, 2)]    
+
+    penalty = 0.0
+
+    # Increase penalty for each agent in bubble with more severity for being within the smaller bubble
+    for idx, other_state in enumerate(global_state):
+        if idx == agent.agent_n - 1:
+            continue    # Skip self
+        other_agent = agent.env.agents[idx]
+        if Goal(other_state, other_agent.route):
+            continue    # Don't count agent as within bubble if they are in their goal
+        if other_state in bubble_2:
+            if other_state in bubble_1:
+                penalty += 1.0
+            else:
+                penalty += 0.5
+
+    return penalty
+
+  
+def collisionCheck(agent, state, global_state) -> int:
+    """Checks if the agent has collided with another agent.
+    
+    Args:
+        agent (class): Specific to the agent.
+        state (tuple): State (xpos, ypos, speed) of that agent.
+        global_state (list of tuples): the state of each agent.
+    
+    Returns:
+        int: 1 if collision has occurred, 0 otherwise.
+    """
+
+    x, y, sp = state
+    route = agent.route["Route"]
+
+    # Ensure multiple agents in same end goal aren't considered to have collided
+    if (x, y) in agent.route["End Goal"]:
+        return 0
+    
+    idx_self = agent.agent_n - 1
+    other_states = [s for i, s in enumerate(global_state) if i != idx_self]
+
+    # Check if occupies same state as another agent
+    if (x, y) in [(s[0], s[1]) for s in other_states]:
+        return 1
+
+    # Ensure that a jump over another agent moving at a slower speed counts as collision
+    if (x, y) in route:
+        i = route.index((x, y))
+        if i + 1 < len(route):
+            next_pos = route[i + 1]
+            for s in other_states:
+                if (s[0], s[1]) == next_pos and sp == 2 and s[2] in (0, 1):
+                    return 1      
+                  
+    # Ensures that when an agent is jumped over, it too receives the collision deduction
+    for _, r in routes.items():
+        other_route = r["Route"]
+        for os in other_states:
+            if (os[0], os[1]) in other_route:
+                j = other_route.index((os[0], os[1]))
+                if j + 1 < len(other_route):
+                    next_pos = other_route[j + 1]
+                    if ((x, y) == next_pos and os[2] == 2 and sp in (0, 1)):
+                        return 1
+    return 0
+
+
+def rewardFunction(agent, state, action, global_state, log = False, collided_agents=None) -> float:
+    """Returns the total reward given by the environment according to an agent's route, state, action, and the global state. 
+
+    Args:
+        agent (class): Specific to the agent.
+        state (tuple): State (xpos, ypos, speed) of that agent.
+        action (int): The action the agent has chosen to take.
+        global_state (list of tuples): The state of each agent.
+        log (bool): True for print reward information. 
+            Defaults to False.
+    
+    Returns:
+        total_reward (float): The summation of all penalties and rewards associated with the agent's action and the global state.
+    """
+    global reached_goal
+    global t
+    route = agent.route
+    
+    # Reward weights
+
+    const1 = 40     # Reward for reaching the goal
+    const2 = 100    # Penalty for colliding with another agent
+    const3 = 0.25   # Penalty per move
+    const4 = 5      # Penalty for tailing another agent
+    const5 = 0.5    # Penalty for being within 2 squares of another agent
+    const6 = 1      # Penalty for not moving
+
+    # Reward weighting
+    #if (reached_goal[agent.agent_n - 1] == False and Goal(state, route) == 1):
+       # goal_reward = const1
+     #   reached_goal[agent.agent_n - 1] = True
+    #else:
+        #goal_reward = 0
+
+    goal_reward = const1 * Goal(state, route)
+    # Use centralized collided_agents if provided for symmetric handling, else fallback
+    if collided_agents is not None:
+        collision_penalty = const2 if (agent.agent_n - 1) in collided_agents else 0
+    else:
+        collision_penalty = const2 * collisionCheck(agent, state, global_state)
+    move_penalty = round(const3 * t, 2)
+    tailing_penalty = const4 * proximityCheck(agent, state, global_state)
+    bubble_penalty = const5 * bubbleCheck(agent, state, global_state)
+    not_moving_penalty = const6 * notMoving(state, action)
+
+    total_reward = (goal_reward - collision_penalty - move_penalty - tailing_penalty - bubble_penalty - not_moving_penalty)
+
+
+    if log:  
+        tqdm.write(f"Agent {agent.agent_n} | State: {state} | Action: {action} \nGlobal State: {global_state} \n Rewards: {{\n"
+              f"  Goal: {goal_reward},\n"
+              f"  Collision: -{collision_penalty},\n"
+              f"  Move: -{move_penalty},\n"
+              f"  Tailing: -{tailing_penalty},\n"
+              f"  Bubble: -{bubble_penalty},\n"
+              f"  Not Moving: -{not_moving_penalty}\n"
+              f"}} | Step Reward: {total_reward} \n")
+        
+    return total_reward
+
+
+# Map each route ID to a lookup table that assigns an index to every (x, y) position
+# Example: route_idx[rid][(x, y)] = position index along that route
+route_idx = {rid: {pos: i for i, pos in enumerate(info["Route"])}
+             for rid, info in routes.items()}
+
+# tp = transition probabilities
+# Structure: tp[route_id][(x, y, s)][action][(nx, ny, ns)] = probability
+# Meaning: given current state (position, speed) and an action, what's the probability
+#          of transitioning to the next state (nx, ny, ns).tp = {rid: {} for rid in routes}
+tp = {rid: {} for rid in routes}
+
+# For each route, loop through all coord pairs in that route and valid speeds for those coord pairs
+for rid, info in routes.items():
+    rlist = info["Route"]
+    idx_of = route_idx[rid]
+    for (x, y) in rlist:
+        i = idx_of[(x, y)]
+        for s in (0, 1, 2):
+            tp[rid].setdefault((x, y, s), {})
+            candidates = list(neighboringStates((x, y, s), info))
+
+            # Loop through all legal actions for a given next state and assign probabilities
+            for action in getLegalActions((x, y, s), info):
+                tp[rid][(x, y, s)].setdefault(action, {})
+                if not candidates:  # Only add to tp if a valid next state exists
+                    continue
+                
+                # Action = 0 (keep speed) is more reliable than speed changes
+                if action == 0:
+                    p_intended = 0.99
+                else:
+                    p_intended = 0.90
+                
+                n_cand = len(candidates)
+
+                # Distribute leftover probability across unintended outcomes
+                p_other = (1.0 - p_intended) / max(1, n_cand - 1)
+
+                # How far an agent can move forward given speed s so that it stays on route
+                step = min(s, len(rlist) - 1 - i)
+
+                for (nx, ny, ns) in candidates:
+
+                    # Intended position is progress along the route by 'step'
+                    intended_pos_ok = ((nx, ny) == rlist[i + step])
+                    
+                    # Intended next speed is s + action
+                    intended_speed_ok = (ns == s + action)
+
+                    # If both next position and next speed align, assign intended probability
+                    is_intended = intended_pos_ok and intended_speed_ok
+                    tp[rid][(x, y, s)][action][(nx, ny, ns)] = p_intended if is_intended else p_other
+
+
+class FlatGridWorld:
+
+    def __init__(self, size, agents) -> None:
+        """Initializes the world size, agents, and global state.
+
+        Args:
+            self: The environment.
+            size (int): The length of one side of the world.
+            agents (list of classes): Each agent class.
+
+        Returns:
+            None
+        
+        """
+
+        self.size = size  # grid is size x size
+        self.agents = agents
+        self.global_state = [agent.state for agent in sorted(agents, key = lambda ag: ag.agent_n)]
+
+
+    def render(self) -> None:
+        """Sets the cmap for agents, obstacles, and road to be displayed in a matplotlib figure.
+
+        Args:
+            self: The environment.
+
+        Returns:
+            None
+        """
+
+        global n_agents
         plt.clf()
 
         grid = np.zeros((self.size, self.size))
 
         # Fill in obstacle, agent, start, goal
-        for coord in product(range(args.size), repeat=2):  # loops through (0,0), (0,1), ..., (11,11)
-            if coord in totObs:
-                grid[coord] = -1
+        for coord in totObs:
+            grid[coord] = -1
+
+        for agent in self.agents:
+            for coord in agent.route["End Goal"]:
+                grid[coord] = 0.8
 
         for i in range(n_agents):
-            grid[agents[i].agent_pos] = 1.0
+            x, y = self.agents[i].state[0], self.agents[i].state[1]
+            if (x, y) not in allGoals:
+                grid[(x, y)] = 1.0
+            else:
+                grid[(x, y)] = 0.2
 
-        grid[self.goal] = 0.8
+        for agent in self.agents:
+            x, y = agent.state[0], agent.state[1]
+            if agent.agent_n == 1:
+                grid[(x,y)] = 0.2
+            if agent.agent_n == 2:
+                grid[(x,y)] = 2.2
+            if agent.agent_n == 3:
+                grid[(x,y)] = 2.8
 
-        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red'])
-        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5]
+        """
+        # Display the number of ticks occurring in an episode
+        plt.text(0.05, 0.05, f"Ticks: {t}", 
+                 transform=plt.gca().transAxes,  # position relative to axes (0-1)
+                 fontsize=10, color='black', 
+                 verticalalignment='bottom', horizontalalignment='left')
+        """
+
+        cmap = colors.ListedColormap(['white', 'black', 'blue', 'green', 'red', 'yellow', 'orange', 'pink'])
+        bounds = [-1.5, -0.5, 0.1, 0.5, 0.9, 1.5, 2, 2.5, 3.5]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
-        arc = Arc(
-            xy=(args.size//2 - 0.5, args.size//2 - 0.5),             # center of the full ellipse
-            width=args.size//4, height=args.size//4,     # diameter of the arc (radius*2)
-            angle=270,               # rotation of the arc
-            theta1=0, theta2=90,   # start and end angles in degrees
-            color='white',
-            linestyle=(0, (10, 5)),
-            linewidth=2
-        )
-
-        plt.imshow(grid, cmap=cmap, norm=norm)
+        plt.imshow(grid.T, cmap=cmap, norm=norm)
         plt.xticks([])
         plt.yticks([])
-        plt.axvline(ymax = 0.50, x = args.size*5//8 - 0.5 if (args.size//12)%2 == 0 else args.size*5//8, color = 'yellow', linestyle='--') #((L/4)%2)*0.5)
-        plt.axhline(xmin = 0.75, y= args.size*3//8 - 0.5 if (args.size//12)%2 == 0 else args.size//3, color='yellow', linestyle='--')
-        plt.axhline(xmax = 0.5, y = args.size*3//8 - 0.5 if (args.size//12)%2 == 0 else args.size//3, color='yellow', linestyle='--')
+        plt.axhline(xmin = 0.65, y = 11.5, color = 'yellow', linestyle='--')
+        plt.axhline(xmax = 0.35, y = 11.5, color = 'yellow', linestyle='--')
+        plt.axvline(ymin = 0.65, x= 11.5, color='yellow', linestyle='--')
+        plt.axvline(ymax = 0.35, x = 11.5, color='yellow', linestyle='--')
+        plt.axhline(y=8, xmin=0.5, xmax=0.65, color='white', linestyle='-')
+        plt.axhline(y=15, xmin = 0.35, xmax = 0.5, color='white', linestyle='-')
 
         ax = plt.gca()
-        ax.add_patch(arc)
-
+        ax.invert_yaxis()
         plt.grid(True)
 
 
-    #Update world will take in an agent and a new position and update that agents position according to 
-    #grid spaces where the agent is allowed to move to. 
-    def updateWorld(self, agent, chosen_action):
-        for i in range(n_agents):
-            if chosen_action in agent.getLegalActions():
-                chosen_action = random.choices(list(tp[self.agent_pos][chosen_action].keys()), weights=list(tp[self.agent_pos][chosen_action].values()), k=1)[0]
-                agent.agent_pos = chosen_action
+    def updateWorld(self, actions) -> dict:
+        """Takes an ordered dictionary of actions and updates each agent state accordingly using transition probabilities.
+
+        Args:
+            self: The environment.
+            actions (dict of ints): Actions to be attempted by each agent.
+
+        Returns: 
+            new_states (dict of tuples): Dictionary pairing each agent to their new state. 
+        """
+
+        new_states = {}
+
+        # find next state for each agent according to their action
+        for agent, action in actions.items():
+
+            # Derive agent route id
+            route_num = None
+            for key, value in routes.items():
+                if value is agent.route:
+                    route_num = key
+                    break
+
+            # Create list of possible next states and associated transition probabilities
+            next_states = list(tp[route_num][agent.state][action].keys())
+            probs = list(tp[route_num][agent.state][action].values())
+            
+            if not next_states:
+                # If no next state exists, agent state stays static
+                s_prime = agent.state
+            else:
+                # Otherwise, choose next state according to tp
+                s_prime = random.choices(next_states, weights=probs, k=1)[0]
+            
+            new_states[agent] = s_prime
+        
+        for agent, s_prime in new_states.items():
+            agent.state = s_prime
+
+        # Update the global state with the true next states
+        self.global_state = [agent.state for agent in sorted(self.agents, key = lambda ag: ag.agent_n)]
+        
+        global t
         t += 1
+        return new_states
 
 
-#The agent class holds the relevant information for each agent including starting location as a coordinate, 
-#the number of the agent, the position, the speed, and the hyperparameter. 
+
 class Agent:
-    def __init__(self, agent_n, start, agent_pos, agent_v, phi, lamda, gamma_gain, gamma_loss):
+
+    def __init__(self, agent_n, route, phi, lamda, gamma_gain, gamma_loss, alpha, beta, env) -> None:
+        """Initialize agent parameters, Q-table, and state.
+
+        Args:
+            self: Specific to the agent.
+            agent_n (int): Agent index.
+            route (dictionary of a list of tuples): Coordinates of agent start state, route, and end state. 
+            phi (float): SVO angular alignment.
+            lamda (float): Loss aversion coefficient (CPT).
+            gamma_gain (float): Decision weight for gains (CPT).
+            gamma_loss (float): Decision weight for losses (CPT).
+            alpha (float): Sensitivity to gains (CPT).
+            beta (float): Sensitivity to losses (CPT).
+            env (class): The environment (contains agents, obstacles, etc.).
+
+        Returns:
+            None
+        """
+
         self.agent_n = agent_n
-        self.start = start
-        self.agent_pos = agent_pos
-        self.agent_v = agent_v
+        self.route = route
         self.phi = phi
         self.lamda = lamda
         self.gamma_gain = gamma_gain
         self.gamma_loss = gamma_loss
+        self.alpha = alpha
+        self.beta = beta
+        self.env = env
 
-        self.qtable = {(r,c): {} for r,c in product(range(12), repeat = 2)}
-        for r,c in product(range(12), repeat = 2):
-            for a in neighboringSqrs((r,c)):
-                tp[(r,c)][(a[0] - r, a[1] - c)] = 0
+        # Lazy Q-table approach (populated as new global states appear)
+        self.qtable = {}
+
+        global n_agents
 
         self.reset()
 
-    #Reset is called at the end of the initializing function to ensure the agents are at the right starting points
-    def reset(self):
-        self.agent_pos = self.start
-        return self.agent_pos
-        
-    def getLegalActions(self):
-        legal_actions = []
-        for i in self.neighboringSqrs():
-            if i[0] > self.agent_pos[0]:
-                legal_actions.append((1,0))
-            if i[0] < self.agent_pos[0]:
-                legal_actions.append((-1,0))
-            if i[1] > self.agent_pos[1]:
-                legal_actions.append((0,1))
-            if i[1] < self.agent_pos[1]:
-                legal_actions.append((0,-1))
 
-        if self.agent_pos == env.goal:
-            legal_actions = [0]
-            return legal_actions
-        else:
-            return legal_actions
-            
-    def getQValue(self, action): #takes state as coord tuple and action as [up], [left]...
+    def reset(self) -> tuple:
+        """Sets agent state to its start state as defined in its route.
+        
+        Args:
+            self: Specific to the agent.
+
+        Returns:
+            tuple: The agent's state (reset to its start state).
         """
-            Returns Q(state, action)
-            Note: need to make sure it returns zero if state is new
-        """
-        return self.qtable[self.agent_pos][action]
+
+        self.state = self.route["Start State"]
+        return self.state
     
-    def getAction(self):
-        """
-            Choose an action for a given state using the exploration rate
-            When exploiting, use computeActionFromQValues
-        """
-        
-        action = None
 
-        #If at terminal state no legal actions can be taken
-        if self.getLegalActions() == [0]:
-            return None
+    def getQValue(self, global_state, action) -> float:
+        """Looks up the Q-value for a given global state and action.
+
+        Args:
+            self: Spcific to the agent.
+            global_state (list of tuples): The state (xpos, ypos, speed) of each agent.
+            action (int): The action taken by the agent.
+
+        Returns:
+            float: the corresponding Q-value read from the Q-table.
+        """
+
+        # Convert global_state to tuple to match with Q-table entry data type
+        state_key = tuple(global_state)
+
+        if state_key not in self.qtable:
+            return  0.0     # Default to 0 if global_state does not yet exist in Q-table
         
-        #Choose explore or exploit based on exploration rate epsilon
+        return self.qtable[state_key].get(action, 0.0)
+    
+
+    def getAction(self, global_state, epsilon) -> int:
+        """Returns an action to be taken by the agent at a global state that randomly explores or exploits based on epsilon.
+        
+        Args:
+            self: Specific to the agent.
+            global_state (list of tuples): The state (xpos, ypos, speed) of each agent.
+            epsilon (float): An exponentially decreasing parameter that is used to weigh the likelihood of exploring vs exploiting.
+
+        Returns:
+            action (int): The suggested action to be taken.
+        """
+
+        # Explore with probability of epsilon
         explore = random.choices([True, False], weights=[epsilon, (1 - epsilon)], k=1)[0]
-        if explore == True:
-            action = random.choice(self.getLegalActions())
+        if explore:
+            # Choose random legal action
+            legal_actions = getLegalActions(self.state, self.route)
+            if not legal_actions:
+                return None
+            return random.choice(legal_actions)
         else:
-            action = self.getPolicy(self.agent_pos)
+            # Follow policy based on Q-values
+            action = self.getPolicy(global_state)
 
-        return action
+            return action
 
-    def updateQ(self, action, q_old):
+
+    def updateQ(self, global_state, action) -> None:
+        """Uses the Bellman equation to update the Q-value for a given global state and action.
+
+        Args:
+            self: Specific to agent.
+            global_state (list of tuples): The state (xpos, ypos, speed) of each agent.
+            action (int): The action (-1, 0, 1) chosen by the agent.
+
+        Returns:
+            None
         """
-            Performs the CPT-based Q-value update by using samples for the estimated future Q-value
-        """
-        samples = self.sample_outcomes(action, q_old)
+
+        # Create a list of potential total returns for the taken action and predicted next global states
+        samples = self.sample_outcomes(action)
+
+        # Average and distort the list of sampled returns using CPT (return = reward + discounted lookahead value)
         target = self.rho_cpt(samples)
-        current_q = self.getQValue(action)
+
+        current_q = self.getQValue(global_state, action)
+
+        # Blend predicted return (target) with current Q-value to update the Q-value for the global state and action
         new_q = ((1 - lr) * current_q) + (lr * target)
-        self.qtable[self.agent_pos][action] = new_q 
+        state_key = tuple(global_state)
+        if state_key not in self.qtable:
+            self.qtable[state_key] = {}
+        self.qtable[state_key][action] = new_q
 
-    def sample_outcomes(self, action, q_old, n_samples=50):
+
+    def sample_outcomes(self, action, n_samples=50) -> list:
+        """Compiles a list of returns (reward + discounted lookahead value) across sampled state/action pairs.
+
+        Args: 
+            self: Specific to agent.
+            action (int): The action taken by the agent. 
+            n_samples (int): Number of samples to be taken (defaults to 50).
+
+        Returns:
+            samples (list of floats): List of returns for a state/action pair according to transition probabilty.
         """
-            Using the current state and passed action and dictionary of transition probabilities,
-            compiles a list of samples for future Q-values to be modified using CPT and then used
-            in the updateQ function
-        """
+
         samples = []
+
+        # Derive agent route id
+        route_num = None
+        for key, value in routes.items():
+            if value is self.route:
+                route_num = key
+                break
+
+        # Create list of possible next states and associated transition probabilities
+        next_states = list(tp[route_num][self.state][action].keys())
+        probs = list(tp[route_num][self.state][action].values())
         
-        try:
-            next_state_probs = tp[self.agent_pos][action]
-        except KeyError:
-            return [0.0] * n_samples # if (state, action) pair is not found
+        # Sort agents by agent_n to ensure ordering consistency
+        ordered_agents = sorted(self.env.agents, key=lambda a: a.agent_n)
 
-        next_states = list(next_state_probs.keys())
-        probs = list(next_state_probs.values())
-
+        # Take samples of possible next global states and collect discounted rewards in list
         for _ in range(n_samples):
-            s_prime = random.choices(next_states, weights=probs, k=1)[0]
+            states_by_id = {}   # Ordered dict of all next states
+            actions_by_id = {}  # Ordered dict of all next actions
+            
+            # Loop through all agents and fill dicts with possible next states and actions
+            for ag in ordered_agents:
+                # Choose possible next state for self
+                if ag is self:
+                    s_prime = random.choices(next_states, weights=probs, k=1)[0]
+                    states_by_id[ag.agent_n] = s_prime
+                
+                # For all other agents, use a legal action to determine a possible next state and add both to the dicts
+                else:
+                    # Derive other agent route id
+                    other_rid = None
+                    for key, value in routes.items():
+                        if value is ag.route:
+                            other_rid = key
+                            break
+                    other_actions = getLegalActions(ag.state, ag.route)
+                    if not other_actions:
+                        other_s_prime = ag.state    # If no legal action available, agent state stays static
+                        other_action = None
+                    else:
+                        other_action = random.choice(other_actions)
+                        if (ag.state not in tp[other_rid] or other_action not in tp[other_rid][ag.state] or not tp[other_rid][ag.state][other_action]):
+                            other_s_prime = ag.state    # If state/action pair not present in tp, agent state stays static
+                        else:
+                            other_next_states = list(tp[other_rid][ag.state][other_action].keys())
+                            other_probs = list(tp[other_rid][ag.state][other_action].values())                    
+                            other_s_prime = random.choices(other_next_states, weights=other_probs, k=1)[0]
+                    states_by_id[ag.agent_n] = other_s_prime
+                    actions_by_id[ag.agent_n] = other_action
 
-            reward = getReward(self.agent_pos, action)
-            legal_actions = list(q_old[s_prime].keys()) if s_prime in q_old else []
-            v_s_prime = max([q_old[s_prime][a] for a in legal_actions], default=0.0)
+            # Ordered list of all predicted next states
+            predicted_global_state = [states_by_id[i] for i in range(1, len(ordered_agents) + 1)]
 
-            full_return = reward + (self.gamma * v_s_prime) + random.gauss(0,1)
+            # Compute own reward
+            self_reward = rewardFunction(self, predicted_global_state[self.agent_n - 1], action, predicted_global_state)
 
+            other_rewards = 0.0
+            contributors = 0
+
+            # Compute total rewards for all other agents
+            for ag in ordered_agents:
+                if ag is self:
+                    continue    # Only look at other agents
+
+                predicted_next = predicted_global_state[ag.agent_n - 1]
+                predicted_next_pos = (predicted_next[0], predicted_next[1])
+                goal_state = ag.route["End Goal"]
+
+                # If the agent is in its goal and didn't only just reach it, don't count its reward for the average other reward
+                if predicted_next_pos in goal_state and (ag.state[0], ag.state[1]) in goal_state:
+                    r = 0
+                else:
+                    r = rewardFunction(ag, predicted_next, actions_by_id.get(ag.agent_n), predicted_global_state)
+                    contributors += 1   # Increase tally for the number of agents contributing to the average other reward 
+                other_rewards += r
+
+            # Compute average other agent reward
+            avg_other_reward = other_rewards / contributors if contributors > 0 else 0.0
+            
+            # Compute total weighted utility using SVO
+            weighted_joint_reward = math.cos(self.phi) * self_reward + math.sin(self.phi) * avg_other_reward
+
+            legal_actions = getLegalActions(s_prime, self.route)
+
+            # Calculate the best Q-value for the predicted global state across all legal actions (lookahead value)
+            if not legal_actions:
+                v_s_prime = 0.0
+            else:
+                v_s_prime = max(self.getQValue(predicted_global_state, a) for a in legal_actions)
+            
+            full_return = weighted_joint_reward + (discount * v_s_prime) # Multiply v_s_prime by discount factor to balance immediate reward with long-term planning
             samples.append(full_return)
+        
         return samples
 
-    def rho_cpt(self, samples):
-        """
-            Compute CPT-value of a discrete random variable X given samples
-            'samples' is a list of outcomes (comprised of rewards + discounted future values)
-        """ 
 
+    def rho_cpt(self, samples) -> float:
+        """Uses CPT to transform a list of sampled rewards to a single estimated reward for a state/action pair.
+            CPT distorts low and high probabilities and scales the overall reward based on loss sensitivity.
+            CPT formula from Tversky and Kahneman 1992 paper
+            
+            Args:
+                self: Specific to agent.
+                samples (list of floats): List of possible rewards for a given state/action pair.
+ 
+            Returns:
+                rho (float): The CPT-distorted average reward.
+        """
+
+        # Convert samples to a numpy array and sort them in ascending order
         X = np.array(samples)
         X_sort = np.sort(X, axis = None)
         N_max = len(X_sort)
-       
+
         rho_plus = 0
         rho_minus = 0
 
-        alpha = self.alpha
-        lamda = self.lamda
+        # Decision weights for gains (gamma+) and losses  (gamma-)
         g_g = self.gamma_gain
         g_l = self.gamma_loss 
 
+        # Iterate through ordered outcomes to compute decision weights
+        for ii in range(1, N_max):
+            z_1 = (N_max - ii + 1) / N_max  # upper trail prob (gain side)
+            z_2 = (N_max - ii) / N_max      # lower trail prob (gain side)
+            z_3 = ii / N_max                # upper trail prob (loss side)
+            z_4 = (ii-1) / N_max            # lower trail prob (loss side)
 
-        for ii in range(0, N_max):
-            z_1 = (N_max + ii - 1) / N_max
-            z_2 = (N_max - ii) / N_max
-            z_3 = ii / N_max
-            z_4 = (ii-1) / N_max
-            rho_plus = rho_plus + max(0, X_sort[ii])**alpha * (z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g))
-            rho_minus = rho_minus + (-lamda * max(0, -X_sort[ii])**alpha) * (z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l))
+            # Contribution of positive outcomes (gains)
+            rho_plus = rho_plus + max(0, X_sort[ii])**self.alpha * (
+                z_1**g_g / (z_1**g_g + (1 - z_1)**g_g)**(1 / g_g) 
+                - z_2**g_g / (z_2**g_g + (1 - z_2)**g_g)**(1 / g_g)
+            )
+
+            # contribution of negative outcomes (losses), weighted by lamda (loss aversion)
+            rho_minus = rho_minus + (self.lamda * max(0, -X_sort[ii])**self.beta) * (
+                z_3**g_l / (z_3**g_l + (1 - z_3)**g_l)**(1 / g_l) 
+                - z_4**g_l / (z_4**g_l + (1 - z_4)**g_l)**(1 / g_l)
+            )
+
+        # Overall prospect value = weighted gains - weighted losses
         rho = rho_plus - rho_minus
 
         return rho
     
-    """
-    def value_function(self, reward):
-        alpha = self.alpha
-        if reward >= 0:
-            return reward ** alpha
-        else:
-            return -self.lamda * ((-reward) ** alpha)
 
-    def weight_function(self, p, mode):
-        gamma = self.gamma_gain if mode == 'gain' else self.gamma_loss
-        return (p** gamma) / (((p ** gamma) + (1 - p) ** gamma) ** (1 / gamma))
-    
-    """  
-    
-    def getPolicy(self):
-        """
-        Compute best action to take in a state. Will need to add 
-        belief distribution for multi-agent CPT 
+    def getPolicy(self, global_state) -> int:
+        """Uses an agent's Q-table to find its best action for a given global state.
+
+        Args:
+            self: Specific to agent.
+            global_state (list of tuples): The state (xpos, ypos, speed) of each agent.
+
+        Returns:
+            int: The best action for the agent according to its Q-table given the global state.
         """
 
-        best_value = -float('inf') #may reduce to high int for speed?
-        for action in self.getLegalActions():
-            value = self.getQValue(self.agent_pos, action)
-            best_value = max(best_value, value)
-            if best_value == value:
-                best_action = action
+        legal_actions = getLegalActions(self.state, self.route)
+        if not legal_actions:
+            return None # if no legal action exists, return None
+        
+        best_value = -float('inf')
+        best_actions = []
 
-        return best_action
-    
+        # Find the action that returns the best Q-value
+        for action in legal_actions:
+            value = self.getQValue(global_state, action)
+            if value > best_value:
+                best_value = value
+                best_actions = [action]
+            elif value == best_value:
+                best_actions.append(action)
 
-#Returns available squares which an agent may legally move to for any given agent. 
-def neighboringSqrs(state):
-    valid = [(state[0] + 1, state[1]), 
-    (state[0] - 1, state[1]), 
-    (state[0], state[1] + 1),
-    (state[0], state[1] - 1)]
-    #(state + 1, state + 1),
-    #(state - 1, state + 1),
-    #(state + 1, state - 1),
-    #(state - 1, state - 1)]
-    
-    for i in valid:
-        if (i[0] + state[0]>args.size) or (i[1] + state[1]>args.size):
-            valid.remove(i)
+        return random.choice(best_actions) # random choice in case of Q-value tie
 
-    return valid
+on_press_key("`", toggle_pause)
 
-def rewardFunction(state):
-    #The reward function will go in here
-
-    const1 = 100
-    const2 = 100
-    const3 = 5
-
-    return(const1 * Obs(state) - const2 * Goal(state) - const3 * t)
-
-def Obs(state):
-    if state in totObs:
-        return 1
-    else:
-        return 0
-
-def Goal(state):
-    if state == env.goal:
-        return 1
-    else: 
-        return 0
-"""
-Main function starts here
-"""
-#Right now there is 1 agent
-n_agents = 1
-num_episodes = args.episodes
-all_sqrs = [(r,c) for r in range(args.size) for c in range(args.size)]
-action_set = [(1,0),(0,1),(-1,0),(0,-1)]
-n_actions = len(action_set)
-n_states = len(all_sqrs)
-
-t = 0
-
-tp = {(r,c): {} for r,c in product(range(12), repeat = 2)}
-for r,c in product(range(12), repeat = 2):
-    for a in action_set:
-        tp[(r,c)][a] = {}
-        for n in neighboringSqrs((r,c)):
-            if ((r + a[0], c + a[1]) == n):
-                tp[(r,c)][a][n] = 0.95
-            else:
-                tp[(r,c)][a][n] = (1 - 0.95)/(len(neighboringSqrs((r,c))) - 1)
-
-#Q-learning Definitions
-alpha = 0.88
-beta = 0.88
-lr = 0.2
-discount = 0.95
-epsilon = 1.0
-min_epsilon = 0.05
-decay_rate = 0.995
-# Note: will need to update epsilon per episode using
-#       agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
-
-#An empty array to hold the coordinates of the obstacles. In our case, obstacles are spaces where the road is not. 
-totObs = []
-
-Obs1 = [(r, c) for r in range(0,(args.size//4)) for c in range(args.size)]
-totObs.extend(Obs1)
-
-Obs2 = [(r, c) for r in range((args.size//2), args.size) for c in range(0,(args.size//2))]
-totObs.extend(Obs2)
-
-Obs3 = [(r, c) for r in range((args.size//2),args.size) for c in range(((args.size*3)//4),args.size)]
-totObs.extend(Obs3)
-
-env = FlatGridWorld(size=args.size, goal=(args.size - (2 * args.size//3), args.size - 1), obstacles=(Obs1,Obs2,Obs3))
-agents = [Agent(agent_n = 1, start = (int(args.size - (2/3) * args.size),0), agent_pos = (int(args.size - (2/3) * args.size)), agent_v = 10, phi = 0, lamda = 0, gamma_gain = 0, gamma_loss = 0)]
-
-#Show the visualization
-plt.ion()
-plt.show()
-
-
-"""
-Learning Flow
-
-getAction() -> In terms of exploit/explore and transition probability. 
-
-getReward() -> In terms of current state, action, and transition probability. 
-
-updateQ() -> In terms of current state, action, future states and distorted transition probability. 
-
-updateWorld() -> Update agent states and visualization. 
-
-"""
-
-
-for i in range(num_episodes):
-    agents[0].reset()
-    for i in range(args.size):
-        env.updateWorld(agents[0], (args.size//3,i))
-        env.render()
-        plt.pause(0.01)
+main()
